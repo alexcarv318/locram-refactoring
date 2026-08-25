@@ -1,0 +1,193 @@
+---
+description: All locram-new backend rules stated in the rewrite conversation
+alwaysApply: true
+---
+
+# Locram-new backend rules
+
+These are the rules the user stated for this rewrite. Follow them. Do not add ceremony that is not here.
+
+This file overrides the user-level feature-folder package rule. In this project, layers own folders and features are modules.
+
+## Goal
+
+- Keep the product as functional as it is now.
+- Significantly reduce the quantity of code.
+- Improve readability.
+- Locram does not need complex code. Prefer the easy version.
+- Keep the architectural foundation: repositories, models, schemas, services, abstractions.
+- Build in a new empty project (`locram-new`). Do not strangler-refactor the old repo.
+- Feature by feature. Nothing redundant.
+- No pull requests until the rewrite is finished.
+- Do not restore `lint_src_architecture.py`.
+
+## What must not exist
+
+- No `di/` package.
+- No `Runtime`.
+- No `Context`.
+- No containers.
+- No `make_runtime`.
+- No controllers.
+- No presenters.
+- No extra API layers.
+- No stdlib HTTP server. Use FastAPI.
+- No `/views`.
+- No inner packages under a feature when one module is enough.
+- No `isinstance`.
+- No errors stored as variables.
+- No `dict[str, object]`.
+- No `Any` unless the value is truly any.
+- No `_require_*` helpers.
+- No detached module-level SQL or helper blobs when they belong on a class or in the caller.
+- No abbreviations in names we invent.
+
+```python
+# ❌
+pages_service = (
+    context.pages
+    if context is not None and context.pages is not None
+    else self._runtime.pages
+)
+```
+
+## Dependency tree
+
+- `dependencies.py` has getters only: `get_engine`, `get_<feature>_repository`, `get_<feature>_service`.
+- Engine and session factory live in `database.py`.
+- Every class dependency is an `__init__` argument, typed as the interface.
+- If `PageService` needs a page repository, it takes `page_repository: IPageRepository` in `__init__`.
+- Name every interface `I<Class>`: `IPageService`, `IPageRepository`.
+- Exactly one repository and one service per feature.
+- Exactly one implementation per service or repository unless the business logic literally needs more than one.
+- As many service modules as features. Prefer `/services` with `pages.py`, not `/services/pages/page_service.py`.
+- Prefer one module inside a package. Very few exceptions.
+
+```python
+# ✅
+class PageService(IPageService):
+    def __init__(self, page_repository: IPageRepository) -> None:
+        self._page_repository = page_repository
+```
+
+## Folder layout
+
+Backend code lives under `backend/src/`. Layer folders, feature modules:
+
+```text
+src/
+  models/<feature>.py
+  schemas/<feature>.py
+  exceptions/<feature>.py
+  interfaces/repositories/<feature>.py
+  interfaces/services/<feature>.py
+  repositories/<feature>.py
+  services/<feature>.py
+  api/main.py
+  api/<feature>.py
+  mcp/main.py
+  mcp/<feature>.py
+  database.py
+  dependencies.py
+```
+
+- `models/` contains only the SQLAlchemy model.
+- Enums and Pydantic shapes live in `schemas/`.
+- Exceptions live in `exceptions/`.
+- Use SQLAlchemy for SQLite models.
+- Do not mix exceptions, schemas, or utils into the model file.
+
+## Transports
+
+- `/api` and `/mcp`. Both have `main.py`.
+- `api/main.py` defines the uvicorn application.
+- `mcp/main.py` defines the MCP server.
+- Feature modules in `/api` are routes.
+- Feature modules in `/mcp` are tools.
+- MCP is a foundation of the project. Do not skip it.
+- Do not add a CLI unless asked.
+- The official Python package `mcp` is the SDK. Our MCP app is installed as `locram_mcp`. The folder stays `src/mcp`.
+- Routes type the service as `page_service: IPageService = Depends(get_page_service)`.
+- The exception handler lives in `api/main.py`, not as a helper in a route module.
+- Never construct a repository or service inside a route or a tool.
+
+## Types and mypy
+
+- Everything is typed so `mypy --strict .` passes.
+- Run `mypy --strict .` from `backend/`.
+- Banned: adapting mypy config to stub or disable errors. Fix the code.
+- Types come from typed functions, returns, and variables. Do not check types at runtime.
+- Remove as many if-else branches and defensive statements as possible.
+- Serialize an ORM `Page` to `PageRecord` before `apply`. `apply` does not take the SQLAlchemy model.
+
+```python
+# ✅
+record = payload.apply(PageRecord.model_validate(page))
+page.title = record.title
+
+# ❌
+payload.apply(page)
+```
+
+- Do not write `payload.title if payload.title is not None else current.title` chains. Use one simple apply (`model_dump(exclude_unset=True)` / `model_copy`).
+
+## Errors
+
+- Raise exceptions. Do not return error dicts.
+- Do not keep errors as variables.
+- Callers that need a page write this, every time:
+
+```python
+page = self._page_repository.get(page_id)
+
+if page is None:
+    raise PageNotFoundError(page_id)
+```
+
+## Helpers
+
+- Minimize detached helper functions.
+- Title heading is a small method on the page service, defined at the caller, not a shared monster util.
+- A method that does not use `self` is `@staticmethod`.
+- SQL statements and similar blobs live inside the class that uses them, not at module top level.
+
+## Naming and spacing
+
+- Never write abbreviations. Use full words (`pages_search_index`, not `FTS` / `pages_fts`). Keep a vendor name only when it is the engine's name (`USING fts5`).
+- NEVER write collapsed code with no vertical spacing. Blank lines between steps, around conditionals, and before `return`.
+
+```python
+# ✅
+page = self._page_repository.get(page_id)
+
+if page is None:
+    raise PageNotFoundError(page_id)
+
+return self._to_detail(page)
+
+# ❌
+page = self._page_repository.get(page_id)
+if page is None: raise PageNotFoundError(page_id)
+return self._to_detail(page)
+```
+
+## Frontend
+
+- There will be a desktop frontend.
+- Prefer the existing desktop code.
+- Frontend may stay messy. Clean it later if asked.
+- Backend must be clean. Do not copy old backend ceremony into locram-new.
+
+## Checks
+
+After backend edits, from `backend/`:
+
+```text
+mypy --strict .
+ruff check . --fix
+```
+
+## Feature order
+
+- Pages first. A page lives in one SQLite file. Bases only choose which file later.
+- Do not start the next feature unless asked.
