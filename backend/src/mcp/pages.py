@@ -3,6 +3,7 @@ from typing import Protocol
 
 from dependencies import get_page_service as load_page_service
 from interfaces.services.pages import IPageService
+from schemas.links import InlineLinkResponse
 from schemas.pages import (
     PageAncestor,
     PageCreate,
@@ -130,6 +131,10 @@ def get_page_ancestry(page_id: str) -> list[PageAncestor]:
     return get_page_service().get_page_ancestry(page_id)
 
 
+def get_inline_link(page_id: str) -> InlineLinkResponse:
+    return get_page_service().get_inline_link(page_id)
+
+
 def register(mcp: MCPServerApp) -> None:
     mcp.tool()(create_page)
     mcp.tool()(get_page)
@@ -142,3 +147,4 @@ def register(mcp: MCPServerApp) -> None:
     mcp.tool()(list_pages)
     mcp.tool()(search)
     mcp.tool()(get_page_ancestry)
+    mcp.tool()(get_inline_link)

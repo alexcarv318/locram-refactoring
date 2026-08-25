@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Query
 
-from dependencies import get_page_service
+from dependencies import get_link_service, get_page_service
+from interfaces.services.links import ILinkService
 from interfaces.services.pages import IPageService
+from schemas.links import PageGraphResponse
 from schemas.pages import (
     PageAncestryResponse,
     PageCreate,
@@ -62,6 +64,15 @@ def get_page_ancestry(
     page_service: IPageService = Depends(get_page_service),
 ) -> PageAncestryResponse:
     return PageAncestryResponse(items=page_service.get_page_ancestry(page_id))
+
+
+@pages_router.get("/{page_id}/graph", response_model=PageGraphResponse)
+def get_page_graph(
+    page_id: str,
+    expand_hops: int = Query(default=2, ge=1, le=5),
+    link_service: ILinkService = Depends(get_link_service),
+) -> PageGraphResponse:
+    return PageGraphResponse(item=link_service.get_page_graph(page_id, expand_hops))
 
 
 @pages_router.post("", response_model=PageDetailResponse, status_code=201)

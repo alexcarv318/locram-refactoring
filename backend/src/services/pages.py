@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime, timedelta
 
 from ulid import ULID
@@ -8,12 +9,15 @@ from exceptions.pages import (
     PageNotFoundError,
     PagePromotionError,
 )
+from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.services.pages import IPageService
 from models.pages import Page
+from schemas.links import InlineLinkResponse, ParentSetResponse
 from schemas.pages import (
     MATURITY_PROMOTIONS,
     PageAncestor,
+    PageConnection,
     PageCreate,
     PageDeletedResponse,
     PageDetail,
@@ -32,8 +36,16 @@ from schemas.pages import (
 
 
 class PageService(IPageService):
-    def __init__(self, page_repository: IPageRepository) -> None:
+    _CANONICAL_INLINE_LINK_PATTERN = re.compile(
+        r"(?<!!)\[\[([A-Z0-9]{26})\|([^\[\]]+?)\]\]"
+    )
+    def __init__(
+        self,
+        page_repository: IPageRepository,
+        link_repository: ILinkRepository,
+    ) -> None:
         self._page_repository = page_repository
+        self._link_repository = link_repository
 
     def create_page(self, payload: PageCreate) -> PageDetail:
         self._validate_hub(payload.type, payload.parent_id)
@@ -206,6 +218,22 @@ class PageService(IPageService):
         ancestors.reverse()
         return ancestors
 
+    def set_parent(self, child_id: str, parent_id: str | None) -> ParentSetResponse:
+        if parent_id is not None:
+            parent = self._page_repository.get(parent_id)
+
+            if parent is None:
+                raise PageNotFoundError(parent_id)
+
+        updated = self.update_page(child_id, PageUpdate(parent_id=parent_id))
+
+        return ParentSetResponse(child_id=updated.id, parent_id=updated.parent_id)
+
+    def get_inline_link(self, page_id: str) -> InlineLinkResponse:
+        page = self.get_page(page_id)
+
+        return InlineLinkResponse(link=f"[[{page.id}|{page.title}]]")
+
     @staticmethod
     def _validate_hub(page_type: PageType, parent_id: str | None) -> None:
         if page_type is PageType.HUB and parent_id is not None:
@@ -262,6 +290,43 @@ class PageService(IPageService):
             next_review_at=next_review,
             parent=parent,
             sub_items=[PageTitleRef(id=child.id, title=child.title) for child in children],
-            connected_to=[],
-            inline_mentions=[],
+            connected_to=self._connected_to(page),
+            inline_mentions=self._inline_mentions(page.content),
         )
+
+    def _connected_to(self, page: Page) -> list[PageConnection]:
+        connections: list[PageConnection] = []
+
+        for link in self._link_repository.list_for_page(page.id):
+            other_id = link.target_id if link.source_id == page.id else link.source_id
+            other = self._page_repository.get(other_id)
+
+            if other is None:
+                continue
+
+            direction = "outgoing" if link.source_id == page.id else "incoming"
+            connections.append(
+                PageConnection(
+                    id=other.id,
+                    title=other.title,
+                    link_type=link.link_type.value,
+                    direction=direction,
+                )
+            )
+
+        return connections
+
+    def _inline_mentions(self, content: str) -> list[PageTitleRef]:
+        mentions: list[PageTitleRef] = []
+        seen: set[str] = set()
+
+        for page_id, display_title in self._CANONICAL_INLINE_LINK_PATTERN.findall(content):
+            if page_id in seen:
+                continue
+
+            seen.add(page_id)
+            page = self._page_repository.get(page_id)
+            title = page.title if page is not None else display_title
+            mentions.append(PageTitleRef(id=page_id, title=title))
+
+        return mentions

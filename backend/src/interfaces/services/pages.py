@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from schemas.links import InlineLinkResponse, ParentSetResponse
 from schemas.pages import (
     PageAncestor,
     PageCreate,
@@ -56,3 +57,9 @@ class IPageService(ABC):
 
     @abstractmethod
     def get_page_ancestry(self, page_id: str) -> list[PageAncestor]: ...
+
+    @abstractmethod
+    def set_parent(self, child_id: str, parent_id: str | None) -> ParentSetResponse: ...
+
+    @abstractmethod
+    def get_inline_link(self, page_id: str) -> InlineLinkResponse: ...

@@ -2,6 +2,7 @@ import importlib
 from collections.abc import Callable
 from typing import cast
 
+from . import links as link_tools
 from .pages import MCPServerApp, register
 
 
@@ -13,6 +14,7 @@ def _build_server() -> MCPServerApp:
 
 mcp = _build_server()
 register(mcp)
+link_tools.register(mcp)
 
 
 def main() -> None:
