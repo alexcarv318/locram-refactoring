@@ -4,24 +4,15 @@ from fastapi.responses import JSONResponse
 
 from api.links import links_router
 from api.pages import pages_router
-from exceptions.links import LinkError
-from exceptions.pages import PageError
+from exceptions.app import AppError
 
 app = FastAPI(title="locram")
 app.include_router(pages_router)
 app.include_router(links_router)
 
 
-@app.exception_handler(PageError)
-async def handle_page_error(_request: Request, error: PageError) -> JSONResponse:
-    return JSONResponse(
-        status_code=error.status_code,
-        content={"detail": str(error)},
-    )
-
-
-@app.exception_handler(LinkError)
-async def handle_link_error(_request: Request, error: LinkError) -> JSONResponse:
+@app.exception_handler(AppError)
+async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
         content={"detail": str(error)},

@@ -1,6 +1,4 @@
-from collections.abc import Callable
-from typing import Protocol
-
+from dependencies import get_link_repository, get_page_repository, get_session
 from dependencies import get_page_service as load_page_service
 from interfaces.services.pages import IPageService
 from schemas.links import InlineLinkResponse
@@ -20,13 +18,12 @@ from schemas.pages import (
     PageUpdate,
 )
 
-get_page_service: Callable[[], IPageService] = load_page_service
+from .protocol import MCPServerApp
 
 
-class MCPServerApp(Protocol):
-    def tool(self) -> Callable[[Callable[..., object]], Callable[..., object]]: ...
-
-    def run(self) -> None: ...
+def get_page_service() -> IPageService:
+    db = get_session()
+    return load_page_service(get_page_repository(db), get_link_repository(db))
 
 
 def create_page(

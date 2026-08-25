@@ -1,4 +1,7 @@
-class LinkError(Exception):
+from exceptions.app import AppError
+
+
+class LinkError(AppError):
     status_code: int = 400
 
 

@@ -1,4 +1,7 @@
-class PageError(Exception):
+from exceptions.app import AppError
+
+
+class PageError(AppError):
     status_code: int = 400
 
 

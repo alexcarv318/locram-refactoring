@@ -3,7 +3,8 @@ from collections.abc import Callable
 from typing import cast
 
 from . import links as link_tools
-from .pages import MCPServerApp, register
+from . import pages as pages_tools
+from .protocol import MCPServerApp
 
 
 def _build_server() -> MCPServerApp:
@@ -13,7 +14,7 @@ def _build_server() -> MCPServerApp:
 
 
 mcp = _build_server()
-register(mcp)
+pages_tools.register(mcp)
 link_tools.register(mcp)
 
 

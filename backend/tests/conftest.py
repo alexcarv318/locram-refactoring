@@ -2,11 +2,13 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
 import mcp.links as mcp_links
 import mcp.pages as mcp_pages
 from api.main import app
-from database import create_sqlite_engine
+from database import apply_migrations, create_session_factory, create_sqlite_engine
 from dependencies import get_link_service, get_page_service
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
@@ -14,25 +16,36 @@ from services.links import LinkService
 from services.pages import PageService
 
 
-@pytest.fixture
-def page_service() -> PageService:
+def create_test_engine() -> Engine:
     engine = create_sqlite_engine()
-
-    return PageService(PageRepository(engine), LinkRepository(engine))
-
-
-@pytest.fixture
-def link_service() -> LinkService:
-    engine = create_sqlite_engine()
-
-    return LinkService(LinkRepository(engine), PageRepository(engine))
+    apply_migrations(engine)
+    return engine
 
 
 @pytest.fixture
-def services() -> tuple[PageService, LinkService]:
-    engine = create_sqlite_engine()
-    page_repository = PageRepository(engine)
-    link_repository = LinkRepository(engine)
+def db() -> Iterator[Session]:
+    session = create_session_factory(create_test_engine())()
+
+    yield session
+
+    session.commit()
+    session.close()
+
+
+@pytest.fixture
+def page_service(db: Session) -> PageService:
+    return PageService(PageRepository(db), LinkRepository(db))
+
+
+@pytest.fixture
+def link_service(db: Session) -> LinkService:
+    return LinkService(LinkRepository(db), PageRepository(db))
+
+
+@pytest.fixture
+def services(db: Session) -> tuple[PageService, LinkService]:
+    page_repository = PageRepository(db)
+    link_repository = LinkRepository(db)
 
     return (
         PageService(page_repository, link_repository),

@@ -36,9 +36,8 @@ from schemas.pages import (
 
 
 class PageService(IPageService):
-    _CANONICAL_INLINE_LINK_PATTERN = re.compile(
-        r"(?<!!)\[\[([A-Z0-9]{26})\|([^\[\]]+?)\]\]"
-    )
+    _CANONICAL_INLINE_LINK_PATTERN = re.compile(r"(?<!!)\[\[([A-Z0-9]{26})\|([^\[\]]+?)\]\]")
+
     def __init__(
         self,
         page_repository: IPageRepository,

@@ -19,6 +19,7 @@ This file overrides the user-level feature-folder package rule. In this project,
 - Build in a new empty project (`locram-new`). Do not strangler-refactor the old repo.
 - Feature by feature. Nothing redundant.
 - No pull requests until the rewrite is finished.
+- Do not commit unless the user asks after reviewing the work.
 - Do not restore `lint_src_architecture.py`.
 
 ## What must not exist
@@ -53,8 +54,11 @@ pages_service = (
 
 ## Dependency tree
 
-- `dependencies.py` has getters only: `get_engine`, `get_<feature>_repository`, `get_<feature>_service`.
+- `dependencies.py` has getters only: `get_engine`, `get_session`, `get_db`, `get_<feature>_repository`, `get_<feature>_service`.
 - Engine and session factory live in `database.py`.
+- `get_db` yields one sync `Session` per request. Repositories take that session.
+- FastAPI uses `Depends(get_db)`. MCP has no request scope, so a tool-module `get_<feature>_service()` opens `get_session()` and reuses the same repository getters.
+- Repositories inherit `BaseRepository` and `I<Feature>Repository`.
 - Every class dependency is an `__init__` argument, typed as the interface.
 - If `PageService` needs a page repository, it takes `page_repository: IPageRepository` in `__init__`.
 - Name every interface `I<Class>`: `IPageService`, `IPageRepository`.
@@ -86,6 +90,7 @@ src/
   api/main.py
   api/<feature>.py
   mcp/main.py
+  mcp/protocol.py
   mcp/<feature>.py
   database.py
   dependencies.py
@@ -96,6 +101,8 @@ src/
 - Exceptions live in `exceptions/`.
 - Use SQLAlchemy for SQLite models.
 - Do not mix exceptions, schemas, or utils into the model file.
+- Schema changes go through Alembic. Repositories do not create tables, sessions, or run `initialize`.
+- Import models in `alembic/env.py` so metadata is complete.
 
 ## Transports
 
@@ -104,6 +111,9 @@ src/
 - `mcp/main.py` defines the MCP server.
 - Feature modules in `/api` are routes.
 - Feature modules in `/mcp` are tools.
+- `mcp/protocol.py` holds `MCPServerApp`. Do not put that protocol in a feature module.
+- Do not add `mcp/server.py`. That name shadows the official `mcp.server` package when tests import `mcp.*`.
+- Do not use `@mcp.tool`. Our folder is `mcp`, so importing the server into feature modules breaks the official SDK. `main.py` imports `pages as pages_tools` and `links as link_tools`, then calls `register(mcp)`.
 - MCP is a foundation of the project. Do not skip it.
 - Do not add a CLI unless asked.
 - The official Python package `mcp` is the SDK. Our MCP app is installed as `locram_mcp`. The folder stays `src/mcp`.
@@ -135,6 +145,8 @@ payload.apply(page)
 
 - Raise exceptions. Do not return error dicts.
 - Do not keep errors as variables.
+- Every custom exception inherits `AppError`.
+- `api/main.py` has one exception handler for `AppError`. Do not add a handler per feature.
 - Callers that need a page write this, every time:
 
 ```python

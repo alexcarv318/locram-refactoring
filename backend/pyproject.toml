@@ -9,6 +9,7 @@ description = "Local SQLite-first Zettelkasten"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.19.1",
     "fastapi>=0.116.0",
     "mcp>=2.1.0",
     "pydantic>=2.11.0",
@@ -47,6 +48,8 @@ packages = [
 "src/database.py" = "database.py"
 "src/dependencies.py" = "dependencies.py"
 "src/mcp" = "locram_mcp"
+"alembic.ini" = "alembic.ini"
+"alembic" = "alembic"
 
 [tool.ruff]
 line-length = 100

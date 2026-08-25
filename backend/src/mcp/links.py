@@ -1,10 +1,8 @@
-from collections.abc import Callable
-
+from dependencies import get_link_repository, get_page_repository, get_session
 from dependencies import get_link_service as load_link_service
 from dependencies import get_page_service as load_page_service
 from interfaces.services.links import ILinkService
 from interfaces.services.pages import IPageService
-from mcp.pages import MCPServerApp
 from schemas.links import (
     BatchLinkResult,
     LinkCreate,
@@ -14,8 +12,17 @@ from schemas.links import (
     UnlinkedPagesResponse,
 )
 
-get_link_service: Callable[[], ILinkService] = load_link_service
-get_page_service: Callable[[], IPageService] = load_page_service
+from .protocol import MCPServerApp
+
+
+def get_link_service() -> ILinkService:
+    db = get_session()
+    return load_link_service(get_link_repository(db), get_page_repository(db))
+
+
+def get_page_service() -> IPageService:
+    db = get_session()
+    return load_page_service(get_page_repository(db), get_link_repository(db))
 
 
 def link_pages(
