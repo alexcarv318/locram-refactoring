@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.bases import bases_router
+from api.bridge import bridge_router
 from api.links import links_router
 from api.pages import pages_router
 from exceptions.app import AppError
@@ -11,6 +12,7 @@ app = FastAPI(title="locram")
 app.include_router(pages_router)
 app.include_router(links_router)
 app.include_router(bases_router)
+app.include_router(bridge_router)
 
 
 @app.exception_handler(AppError)

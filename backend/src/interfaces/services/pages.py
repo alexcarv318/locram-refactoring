@@ -18,6 +18,11 @@ from schemas.pages import (
 
 
 class IPageService(ABC):
+    """Pages: notes in one SQLite file.
+
+    CRUD, search, trash, review, promote, and parent tree.
+    """
+
     @abstractmethod
     def create_page(self, payload: PageCreate) -> PageDetail: ...
 

@@ -12,12 +12,14 @@ from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.services.bases import IBaseRegistryService
+from interfaces.services.bridge import IBridgeService
 from interfaces.services.links import ILinkService
 from interfaces.services.pages import IPageService
 from repositories.bases import BaseRegistryRepository
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
 from services.bases import BaseRegistryService, selected_working_entry_id
+from services.bridge import BridgeService
 from services.links import LinkService
 from services.pages import PageService
 
@@ -124,3 +126,9 @@ def get_base_registry_service(
     base_registry_repository: IBaseRegistryRepository = Depends(get_base_registry_repository),
 ) -> IBaseRegistryService:
     return BaseRegistryService(base_registry_repository)
+
+
+def get_bridge_service(
+    base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
+) -> IBridgeService:
+    return BridgeService(base_registry_service)

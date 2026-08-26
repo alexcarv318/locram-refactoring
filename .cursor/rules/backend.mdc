@@ -156,6 +156,11 @@ if page is None:
     raise PageNotFoundError(page_id)
 ```
 
+## Docstrings
+
+- Each service interface (`interfaces/services/<feature>.py`) has one class docstring that describes the service, and therefore the feature.
+- Do not add docstrings anywhere else.
+
 ## Helpers
 
 - Minimize detached helper functions.
@@ -202,4 +207,5 @@ ruff check . --fix
 ## Feature order
 
 - Pages first. A page lives in one SQLite file. Bases only choose which file later.
+- Bridge is HTTP only: `GET /api/health` and `GET /api/runtime`. No MCP tools.
 - Do not start the next feature unless asked.

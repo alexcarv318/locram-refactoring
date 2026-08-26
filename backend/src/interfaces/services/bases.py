@@ -8,6 +8,11 @@ from schemas.bases import (
 
 
 class IBaseRegistryService(ABC):
+    """Bases: local knowledge-file registry.
+
+    Create, register, switch, rename, delete, access mode, and working-base selection.
+    """
+
     @abstractmethod
     def list_bases(self) -> list[RegistryEntryRecord]: ...
 

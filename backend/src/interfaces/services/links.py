@@ -11,6 +11,11 @@ from schemas.links import (
 
 
 class ILinkService(ABC):
+    """Links: typed directed edges between pages.
+
+    Inverse pairs, batch writes, and neighborhood graphs.
+    """
+
     @abstractmethod
     def link_pages(
         self,
