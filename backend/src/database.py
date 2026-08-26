@@ -16,6 +16,10 @@ class BaseRepository:
         self.db = db
 
 
+host_state_path = Path.home() / ".locram" / "host-state.db"
+knowledge_path = Path.home() / ".locram" / "locram.db"
+
+
 def apply_migrations(engine: Engine) -> None:
     config = _alembic_config()
 
@@ -62,3 +66,9 @@ def create_sqlite_engine(database_path: Path | None = None) -> Engine:
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def open_knowledge_session(database_path: Path) -> Session:
+    engine = create_sqlite_engine(database_path)
+    apply_migrations(engine)
+    return create_session_factory(engine)()

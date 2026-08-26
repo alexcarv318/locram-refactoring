@@ -6,10 +6,11 @@ from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 
 from database import Base
+from models.bases import BaseMetadata, RegistryEntry
 from models.links import Link
 from models.pages import Page
 
-_ = (Link, Page)
+_ = (BaseMetadata, Link, Page, RegistryEntry)
 
 config = context.config
 

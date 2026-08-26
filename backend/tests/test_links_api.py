@@ -106,3 +106,26 @@ def test_http_batch_link(
     assert result.status_code == 200
     assert result.json()["created"] == 1
     assert len(result.json()["errors"]) == 1
+
+
+def test_http_unlink_without_type_clears_all_links(
+    client: TestClient,
+    services: tuple[PageService, LinkService],
+) -> None:
+    pages, _links = services
+    source = pages.create_page(PageCreate(title="Source"))
+    target = pages.create_page(PageCreate(title="Target"))
+
+    client.post(
+        "/api/links",
+        json={"source_id": source.id, "target_id": target.id, "link_type": "extends"},
+    )
+    client.post(
+        "/api/links",
+        json={"source_id": source.id, "target_id": target.id, "link_type": "related"},
+    )
+
+    deleted = client.delete(f"/api/links?source_id={source.id}&target_id={target.id}")
+
+    assert deleted.status_code == 200
+    assert client.get(f"/api/pages/{source.id}").json()["item"]["connected_to"] == []

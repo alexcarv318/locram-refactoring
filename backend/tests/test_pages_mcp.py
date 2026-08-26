@@ -79,3 +79,13 @@ def test_mcp_page_tool_errors(mcp_page_service: PageService) -> None:
 
     with pytest.raises(PagePromotionError):
         mcp_pages.promote_page(permanent.id)
+
+
+def test_mcp_set_parent_and_inline_link_errors(mcp_page_service: PageService) -> None:
+    missing = "01MISSINGPAGE00000000000000"
+
+    with pytest.raises(PageNotFoundError):
+        mcp_pages.get_inline_link(missing)
+
+    with pytest.raises(PageNotFoundError):
+        mcp_pages.update_page(missing, title="Nope")

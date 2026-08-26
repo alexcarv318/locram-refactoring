@@ -54,3 +54,19 @@ def test_mcp_set_parent_and_batch(mcp_services: tuple[PageService, LinkService])
 
     with pytest.raises(SelfLinkError):
         mcp_links.link_pages(child.id, child.id, LinkType.RELATED)
+
+
+def test_mcp_unlink_all_and_reference(mcp_services: tuple[PageService, LinkService]) -> None:
+    source = mcp_pages.create_page(title="Source")
+    target = mcp_pages.create_page(title="Target")
+
+    mcp_links.link_pages(source.id, target.id, LinkType.REFERENCE)
+    mcp_links.link_pages(source.id, target.id, LinkType.RELATED)
+
+    fetched = mcp_pages.get_page(source.id)
+
+    assert {item.link_type for item in fetched.connected_to} >= {"reference", "related"}
+
+    mcp_links.unlink_pages(source.id, target.id)
+
+    assert mcp_pages.get_page(source.id).connected_to == []

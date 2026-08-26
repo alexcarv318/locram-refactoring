@@ -116,3 +116,30 @@ def test_http_promote_review_search_and_ancestry(
     ancestry = client.get(f"/api/pages/{child.id}/ancestry")
 
     assert [item["id"] for item in ancestry.json()["items"]] == [parent.id]
+
+
+def test_http_list_children_and_graph_hop_bounds(client: TestClient) -> None:
+    parent = client.post("/api/pages", json={"title": "Root"}).json()["item"]
+    child = client.post(
+        "/api/pages",
+        json={"title": "Child", "parent_id": parent["id"]},
+    ).json()["item"]
+
+    children = client.get(f"/api/pages?parent_id={parent['id']}")
+    too_small = client.get(f"/api/pages/{child['id']}/graph?expand_hops=0")
+    too_large = client.get(f"/api/pages/{child['id']}/graph?expand_hops=6")
+
+    assert [item["id"] for item in children.json()["items"]] == [child["id"]]
+    assert too_small.status_code == 422
+    assert too_large.status_code == 422
+
+
+def test_http_update_content_only(client: TestClient) -> None:
+    created = client.post("/api/pages", json={"title": "Note", "content": "old"})
+    page_id = created.json()["item"]["id"]
+
+    updated = client.put(f"/api/pages/{page_id}", json={"content": "new"})
+
+    assert updated.status_code == 200
+    assert updated.json()["item"]["title"] == "Note"
+    assert updated.json()["item"]["content"] == "# Note\n\nnew"

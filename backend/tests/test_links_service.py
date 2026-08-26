@@ -224,3 +224,78 @@ def test_graph_missing_page(services: tuple[PageService, LinkService]) -> None:
 
     with pytest.raises(PageNotFoundError):
         links.get_page_graph("01MISSINGPAGE00000000000000", expand_hops=2)
+
+
+def test_unlink_one_type_leaves_the_other(services: tuple[PageService, LinkService]) -> None:
+    pages, links = services
+    source = pages.create_page(PageCreate(title="Source"))
+    target = pages.create_page(PageCreate(title="Target"))
+
+    links.link_pages(source.id, target.id, LinkType.SUPPORTS)
+    links.link_pages(source.id, target.id, LinkType.QUESTIONS)
+    links.unlink_pages(source.id, target.id, LinkType.SUPPORTS)
+
+    remaining = {
+        (item.link_type, item.direction) for item in pages.get_page(source.id).connected_to
+    }
+
+    assert remaining == {("questions", "outgoing"), ("questioned_by", "incoming")}
+
+
+def test_graph_clamps_hops_and_walks_two_levels(
+    services: tuple[PageService, LinkService],
+) -> None:
+    pages, links = services
+    root = pages.create_page(PageCreate(title="Root", type=PageType.STRUCTURE))
+    middle = pages.create_page(PageCreate(title="Middle", parent_id=root.id))
+    leaf = pages.create_page(PageCreate(title="Leaf", parent_id=middle.id))
+
+    one_hop = links.get_page_graph(root.id, expand_hops=0)
+    two_hops = links.get_page_graph(root.id, expand_hops=2)
+    clamped = links.get_page_graph(root.id, expand_hops=99)
+
+    assert one_hop.scope_kind.value == "structure_anchor"
+    assert {node.id for node in one_hop.nodes} == {root.id, middle.id}
+    assert leaf.id not in {node.id for node in one_hop.nodes}
+    assert {node.id for node in two_hops.nodes} == {root.id, middle.id, leaf.id}
+    assert {node.id for node in clamped.nodes} == {root.id, middle.id, leaf.id}
+
+
+def test_graph_skips_missing_parent_and_soft_deleted_neighbor(
+    services: tuple[PageService, LinkService],
+) -> None:
+    pages, links = services
+    page = pages.create_page(
+        PageCreate(title="Orphan", parent_id="01MISSINGPARENT000000000000")
+    )
+    neighbor = pages.create_page(PageCreate(title="Neighbor"))
+
+    links.link_pages(page.id, neighbor.id, LinkType.RELATED)
+    pages.delete_page(neighbor.id)
+
+    graph = links.get_page_graph(page.id, expand_hops=1)
+    detail = pages.get_page(page.id)
+
+    assert graph.selected_page_id == page.id
+    assert neighbor.id in {node.id for node in graph.nodes}
+    assert any(item.id == neighbor.id for item in detail.connected_to)
+
+
+def test_batch_link_empty_and_contradicts_inverse(
+    services: tuple[PageService, LinkService],
+) -> None:
+    pages, links = services
+    source = pages.create_page(PageCreate(title="Source"))
+    target = pages.create_page(PageCreate(title="Target"))
+
+    empty = links.batch_link([])
+    result = links.link_pages(source.id, target.id, LinkType.CONTRADICTS)
+
+    assert empty.created == 0
+    assert empty.skipped == 0
+    assert empty.errors == []
+    assert result.created_inverse is True
+    assert any(
+        item.link_type == "contradicted_by" and item.direction == "incoming"
+        for item in pages.get_page(source.id).connected_to
+    )

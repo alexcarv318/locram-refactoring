@@ -332,3 +332,84 @@ def test_descendant_count_includes_nested_active_pages(page_service: PageService
 
     assert roots[0].child_count == 1
     assert roots[0].active_descendant_count == 2
+
+
+def test_update_content_rewrites_heading_and_changes_hash(page_service: PageService) -> None:
+    page = page_service.create_page(PageCreate(title="Note", content="old body"))
+    original_hash = page.content_hash
+
+    updated = page_service.update_page(page.id, PageUpdate(content="new body"))
+
+    assert updated.title == "Note"
+    assert updated.content == "# Note\n\nnew body"
+    assert updated.content_hash != original_hash
+
+
+def test_set_parent_and_inline_link_require_existing_page(page_service: PageService) -> None:
+    missing = "01MISSINGPAGE00000000000000"
+
+    with pytest.raises(PageNotFoundError):
+        page_service.set_parent(missing, None)
+
+    with pytest.raises(PageNotFoundError):
+        page_service.get_inline_link(missing)
+
+
+def test_restore_after_restore_and_double_delete(page_service: PageService) -> None:
+    page = page_service.create_page(PageCreate(title="Note"))
+
+    page_service.delete_page(page.id)
+    page_service.delete_page(page.id)
+    restored = page_service.restore_page(page.id)
+
+    assert restored.status is PageStatus.ACTIVE
+
+    with pytest.raises(PageNotDeletedError):
+        page_service.restore_page(page.id)
+
+
+def test_search_includes_deleted_and_ignores_title_only_brackets(
+    page_service: PageService,
+) -> None:
+    page = page_service.create_page(PageCreate(title="Keep", content="findme token"))
+    mentioned = page_service.create_page(PageCreate(title="Target"))
+    linked = page_service.create_page(
+        PageCreate(
+            title="Mentions",
+            content=f"[[NotALink]] and [[{mentioned.id}|Shown]]",
+        )
+    )
+
+    page_service.delete_page(page.id)
+    hits = page_service.search_pages("findme", limit=10)
+
+    assert [hit.id for hit in hits] == [page.id]
+    assert [item.id for item in linked.inline_mentions] == [mentioned.id]
+
+
+def test_archived_child_is_hidden_from_parent(page_service: PageService) -> None:
+    parent = page_service.create_page(PageCreate(title="Root"))
+    child = page_service.create_page(PageCreate(title="Child", parent_id=parent.id))
+
+    page_service.update_page(child.id, PageUpdate(status=PageStatus.ARCHIVED))
+
+    parent_detail = page_service.get_page(parent.id)
+    archived = page_service.list_pages(
+        status=PageStatus.ARCHIVED,
+        parent_id=parent.id,
+        roots_only=False,
+        limit=100,
+        offset=0,
+    )
+
+    assert parent_detail.sub_items == []
+    assert [item.id for item in archived] == [child.id]
+
+
+def test_create_keeps_missing_parent_id(page_service: PageService) -> None:
+    page = page_service.create_page(
+        PageCreate(title="Orphan", parent_id="01MISSINGPARENT000000000000")
+    )
+
+    assert page.parent_id == "01MISSINGPARENT000000000000"
+    assert page.parent is None
