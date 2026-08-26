@@ -89,3 +89,10 @@ def test_mcp_set_parent_and_inline_link_errors(mcp_page_service: PageService) ->
 
     with pytest.raises(PageNotFoundError):
         mcp_pages.update_page(missing, title="Nope")
+
+
+def test_mcp_replace_in_page(mcp_page_service: PageService) -> None:
+    page = mcp_pages.create_page(title="Note", content="alpha alpha")
+    updated = mcp_pages.replace_in_page(page.id, "alpha", "beta")
+
+    assert updated.content == "# Note\n\nbeta alpha"

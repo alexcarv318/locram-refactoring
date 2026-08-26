@@ -20,7 +20,7 @@ from schemas.pages import (
 class IPageService(ABC):
     """Pages: notes in one SQLite file.
 
-    CRUD, search, trash, review, promote, and parent tree.
+    CRUD, search, trash, review, promote, parent tree, and find-and-replace.
     """
 
     @abstractmethod
@@ -68,3 +68,6 @@ class IPageService(ABC):
 
     @abstractmethod
     def get_inline_link(self, page_id: str) -> InlineLinkResponse: ...
+
+    @abstractmethod
+    def replace_in_page(self, page_id: str, old_text: str, new_text: str) -> PageDetail: ...

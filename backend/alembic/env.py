@@ -7,10 +7,12 @@ from sqlalchemy.engine import Connection
 
 from database import Base
 from models.bases import BaseMetadata, RegistryEntry
+from models.changes import ChangeEvent, ChangeVersion
+from models.embeddings import PageEmbedding
 from models.links import Link
 from models.pages import Page
 
-_ = (BaseMetadata, Link, Page, RegistryEntry)
+_ = (BaseMetadata, ChangeEvent, ChangeVersion, Link, Page, PageEmbedding, RegistryEntry)
 
 config = context.config
 

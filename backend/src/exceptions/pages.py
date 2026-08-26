@@ -35,3 +35,12 @@ class PagePromotionError(PageError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class PageTextNotFoundError(PageError):
+    status_code = 404
+
+    def __init__(self, page_id: str) -> None:
+        super().__init__("Text not found in page content")
+
+        self.page_id = page_id

@@ -16,14 +16,38 @@ class BaseRepository:
         self.db = db
 
 
+class KnowledgeEngines:
+    def __init__(self) -> None:
+        self.engines: dict[str, Engine] = {}
+
+    def get(self, database_path: Path) -> Engine:
+        key = str(database_path.expanduser().resolve())
+        engine = self.engines.get(key)
+
+        if engine is None:
+            engine = create_sqlite_engine(database_path)
+            apply_migrations(engine)
+            self.engines[key] = engine
+
+        return engine
+
+    def clear(self) -> None:
+        self.engines.clear()
+
+
 host_state_path = Path.home() / ".locram" / "host-state.db"
 knowledge_path = Path.home() / ".locram" / "locram.db"
 attachments_path = Path.home() / ".locram" / "attachments"
 filter_presets_path = Path.home() / ".locram" / "preferences" / "filter-presets.json"
+embedding_settings_path = Path.home() / ".locram" / "preferences" / "embedding-settings.json"
+huggingface_api_key_path = Path.home() / ".locram" / "preferences" / "huggingface-api-key"
+
+
+knowledge_engines = KnowledgeEngines()
 
 
 def apply_migrations(engine: Engine) -> None:
-    config = _alembic_config()
+    config = alembic_config()
 
     with engine.connect() as connection:
         config.attributes["connection"] = connection
@@ -31,7 +55,7 @@ def apply_migrations(engine: Engine) -> None:
         connection.commit()
 
 
-def _alembic_config() -> Config:
+def alembic_config() -> Config:
     database_directory = Path(__file__).resolve().parent
     config_path = database_directory / "alembic.ini"
 
@@ -71,6 +95,4 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 
 
 def open_knowledge_session(database_path: Path) -> Session:
-    engine = create_sqlite_engine(database_path)
-    apply_migrations(engine)
-    return create_session_factory(engine)()
+    return create_session_factory(knowledge_engines.get(database_path))()

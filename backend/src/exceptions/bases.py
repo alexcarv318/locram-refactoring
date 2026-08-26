@@ -55,3 +55,10 @@ class WorkingBaseReadOnlyError(BaseError):
         super().__init__(f"Working base is read-only: {base_ref}")
 
         self.base_ref = base_ref
+
+
+class WorkingBaseMutationTargetError(BaseError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("Multiple writable local bases exist; pass an explicit base_ref")

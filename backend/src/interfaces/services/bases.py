@@ -60,3 +60,6 @@ class IBaseRegistryService(ABC):
 
     @abstractmethod
     def select_working_base(self, base_ref: str) -> WorkingBaseRecord: ...
+
+    @abstractmethod
+    def get_working_base(self, base_ref: str | None, write: bool) -> WorkingBaseRecord: ...

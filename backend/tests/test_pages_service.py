@@ -5,6 +5,7 @@ from exceptions.pages import (
     PageNotDeletedError,
     PageNotFoundError,
     PagePromotionError,
+    PageTextNotFoundError,
 )
 from schemas.pages import PageCreate, PageStatus, PageType, PageUpdate
 from services.pages import PageService
@@ -368,7 +369,7 @@ def test_restore_after_restore_and_double_delete(page_service: PageService) -> N
         page_service.restore_page(page.id)
 
 
-def test_search_includes_deleted_and_ignores_title_only_brackets(
+def test_search_excludes_deleted_and_resolves_inline_links(
     page_service: PageService,
 ) -> None:
     page = page_service.create_page(PageCreate(title="Keep", content="findme token"))
@@ -383,8 +384,22 @@ def test_search_includes_deleted_and_ignores_title_only_brackets(
     page_service.delete_page(page.id)
     hits = page_service.search_pages("findme", limit=10)
 
-    assert [hit.id for hit in hits] == [page.id]
+    assert hits == []
     assert [item.id for item in linked.inline_mentions] == [mentioned.id]
+
+
+def test_replace_in_page_replaces_first_match(page_service: PageService) -> None:
+    page = page_service.create_page(PageCreate(title="Note", content="alpha alpha"))
+    updated = page_service.replace_in_page(page.id, "alpha", "beta")
+
+    assert updated.content == "# Note\n\nbeta alpha"
+
+
+def test_replace_in_page_missing_text(page_service: PageService) -> None:
+    page = page_service.create_page(PageCreate(title="Note", content="alpha"))
+
+    with pytest.raises(PageTextNotFoundError):
+        page_service.replace_in_page(page.id, "missing", "beta")
 
 
 def test_archived_child_is_hidden_from_parent(page_service: PageService) -> None:

@@ -8,6 +8,7 @@ from exceptions.pages import (
     PageNotDeletedError,
     PageNotFoundError,
     PagePromotionError,
+    PageTextNotFoundError,
 )
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
@@ -227,6 +228,20 @@ class PageService(IPageService):
         updated = self.update_page(child_id, PageUpdate(parent_id=parent_id))
 
         return ParentSetResponse(child_id=updated.id, parent_id=updated.parent_id)
+
+    def replace_in_page(self, page_id: str, old_text: str, new_text: str) -> PageDetail:
+        page = self._page_repository.get(page_id)
+
+        if page is None:
+            raise PageNotFoundError(page_id)
+
+        if old_text not in page.content:
+            raise PageTextNotFoundError(page_id)
+
+        return self.update_page(
+            page_id,
+            PageUpdate(content=page.content.replace(old_text, new_text, 1)),
+        )
 
     def get_inline_link(self, page_id: str) -> InlineLinkResponse:
         page = self.get_page(page_id)

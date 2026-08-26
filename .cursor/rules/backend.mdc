@@ -191,10 +191,13 @@ return self._to_detail(page)
 
 ## Frontend
 
-- There will be a desktop frontend.
+- Everything we build is for desktop. Ship the desktop HTTP/MCP contract with the feature, not later.
 - Prefer the existing desktop code.
 - Frontend may stay messy. Clean it later if asked.
 - Backend must be clean. Do not copy old backend ceremony into locram-new.
+- Desktop page/link/search calls send `?base_ref=local:<entry_id>`. Resolve that file. `read` blocks writes. Implicit writes fail when more than one writable local base exists.
+- Desktop freshness is `GET /api/data-version` (`{ item: { version, updated_at } }`) and `GET /api/events` SSE `data-version`.
+- Desktop embedding settings are `/api/desktop/embedding-settings` plus `/validate`, `/bootstrap`, and `POST /api/desktop/embeddings/run`. Never return the Hugging Face key.
 
 ## Checks
 
@@ -211,4 +214,6 @@ ruff check . --fix
 - Bridge is HTTP only: `GET /api/health` and `GET /api/runtime`. No MCP tools.
 - Attachments are files under `attachments_path`, referenced from page content as `![[filename]]`.
 - Smart folders are JSON presets plus eight built-in scopes. Pages embed filters; matching is metadata-only.
+- Embeddings store float32 vectors on the page SQLite file. Hybrid search fuses FTS with cosine similarity and falls back to FTS when no provider is configured. Settings choose hosted, Hugging Face, or Ollama. Hosted stays not-ready until Access supplies device auth.
+- Changes are SQLite triggers on pages/links. Do not inject a change service into page or link writes.
 - Do not start the next feature unless asked.

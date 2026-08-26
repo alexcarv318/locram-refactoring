@@ -120,6 +120,7 @@ class PageRepository(BaseRepository, IPageRepository):
                     FROM pages_search_index
                     JOIN pages p ON pages_search_index.rowid = p.rowid
                     WHERE pages_search_index MATCH :query
+                      AND p.status = 'active'
                     ORDER BY rank
                     LIMIT :limit
                     """

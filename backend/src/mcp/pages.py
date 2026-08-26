@@ -21,8 +21,8 @@ from schemas.pages import (
 from .protocol import MCPServerApp
 
 
-def get_page_service() -> IPageService:
-    db = get_session()
+def get_page_service(base_ref: str | None = None, write: bool = False) -> IPageService:
+    db = get_session(base_ref, write)
     return load_page_service(get_page_repository(db), get_link_repository(db))
 
 
@@ -35,8 +35,9 @@ def create_page(
     tags: list[str] | None = None,
     parent_id: str | None = None,
     review_interval_days: int = 7,
+    base_ref: str | None = None,
 ) -> PageDetail:
-    return get_page_service().create_page(
+    return get_page_service(base_ref, write=True).create_page(
         PageCreate(
             title=title,
             content=content,
@@ -50,8 +51,8 @@ def create_page(
     )
 
 
-def get_page(identifier: str) -> PageDetail:
-    return get_page_service().get_page(identifier)
+def get_page(identifier: str, base_ref: str | None = None) -> PageDetail:
+    return get_page_service(base_ref).get_page(identifier)
 
 
 def update_page(
@@ -64,6 +65,7 @@ def update_page(
     tags: list[str] | None = None,
     parent_id: str | None = None,
     review_interval_days: int | None = None,
+    base_ref: str | None = None,
 ) -> PageDetail:
     payload = PageUpdate.model_validate(
         {
@@ -82,36 +84,37 @@ def update_page(
         }
     )
 
-    return get_page_service().update_page(page_id, payload)
+    return get_page_service(base_ref, write=True).update_page(page_id, payload)
 
 
-def delete_page(page_id: str) -> PageDeletedResponse:
-    return get_page_service().delete_page(page_id)
+def delete_page(page_id: str, base_ref: str | None = None) -> PageDeletedResponse:
+    return get_page_service(base_ref, write=True).delete_page(page_id)
 
 
-def restore_page(page_id: str) -> PageRestoredResponse:
-    return get_page_service().restore_page(page_id)
+def restore_page(page_id: str, base_ref: str | None = None) -> PageRestoredResponse:
+    return get_page_service(base_ref, write=True).restore_page(page_id)
 
 
-def purge_page(page_id: str) -> PagePurgedResponse:
-    return get_page_service().purge_page(page_id)
+def purge_page(page_id: str, base_ref: str | None = None) -> PagePurgedResponse:
+    return get_page_service(base_ref, write=True).purge_page(page_id)
 
 
-def mark_reviewed(page_id: str) -> PageReviewedResponse:
-    return get_page_service().mark_reviewed(page_id)
+def mark_reviewed(page_id: str, base_ref: str | None = None) -> PageReviewedResponse:
+    return get_page_service(base_ref, write=True).mark_reviewed(page_id)
 
 
-def promote_page(page_id: str) -> PagePromotedResponse:
-    return get_page_service().promote_page(page_id)
+def promote_page(page_id: str, base_ref: str | None = None) -> PagePromotedResponse:
+    return get_page_service(base_ref, write=True).promote_page(page_id)
 
 
 def list_pages(
     status: PageStatus = PageStatus.ACTIVE,
     parent_id: str | None = None,
+    base_ref: str | None = None,
 ) -> list[PageSummary]:
     roots_only = parent_id == "root"
 
-    return get_page_service().list_pages(
+    return get_page_service(base_ref).list_pages(
         status=status,
         parent_id=None if roots_only else parent_id,
         roots_only=roots_only,
@@ -120,16 +123,25 @@ def list_pages(
     )
 
 
-def search(query: str, limit: int = 20) -> list[PageSearchHit]:
-    return get_page_service().search_pages(query, limit)
+def search(query: str, limit: int = 20, base_ref: str | None = None) -> list[PageSearchHit]:
+    return get_page_service(base_ref).search_pages(query, limit)
 
 
-def get_page_ancestry(page_id: str) -> list[PageAncestor]:
-    return get_page_service().get_page_ancestry(page_id)
+def get_page_ancestry(page_id: str, base_ref: str | None = None) -> list[PageAncestor]:
+    return get_page_service(base_ref).get_page_ancestry(page_id)
 
 
-def get_inline_link(page_id: str) -> InlineLinkResponse:
-    return get_page_service().get_inline_link(page_id)
+def get_inline_link(page_id: str, base_ref: str | None = None) -> InlineLinkResponse:
+    return get_page_service(base_ref).get_inline_link(page_id)
+
+
+def replace_in_page(
+    page_id: str,
+    old_text: str,
+    new_text: str,
+    base_ref: str | None = None,
+) -> PageDetail:
+    return get_page_service(base_ref, write=True).replace_in_page(page_id, old_text, new_text)
 
 
 def register(mcp: MCPServerApp) -> None:
@@ -145,3 +157,4 @@ def register(mcp: MCPServerApp) -> None:
     mcp.tool()(search)
     mcp.tool()(get_page_ancestry)
     mcp.tool()(get_inline_link)
+    mcp.tool()(replace_in_page)

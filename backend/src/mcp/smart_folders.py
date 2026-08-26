@@ -17,8 +17,11 @@ from schemas.smart_folders import (
 from .protocol import MCPServerApp
 
 
-def get_smart_folder_service() -> ISmartFolderService:
-    db = get_session()
+def get_smart_folder_service(
+    base_ref: str | None = None,
+    write: bool = False,
+) -> ISmartFolderService:
+    db = get_session(base_ref, write)
     page_repository = get_page_repository(db)
     link_repository = get_link_repository(db)
 
@@ -58,8 +61,9 @@ def get_smart_folder_graph(
     preset_id: str | None = None,
     filter_state: FilterState | None = None,
     expand_hops: int = 2,
+    base_ref: str | None = None,
 ) -> SmartFolderGraph:
-    return get_smart_folder_service().get_smart_folder_graph(
+    return get_smart_folder_service(base_ref).get_smart_folder_graph(
         preset_id,
         filter_state,
         expand_hops,

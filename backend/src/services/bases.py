@@ -11,7 +11,9 @@ from exceptions.bases import (
     BaseFileExistsError,
     BaseFileNotFoundError,
     BaseNotFoundError,
+    WorkingBaseMutationTargetError,
     WorkingBaseNotFoundError,
+    WorkingBaseReadOnlyError,
 )
 from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.services.bases import IBaseRegistryService
@@ -97,7 +99,7 @@ class BaseRegistryService(IBaseRegistryService):
 
         self._read_or_create_metadata(Path(entry.path), entry.display_name)
         self._base_registry_repository.set_active(entry_id)
-        self._clear_knowledge_engine()
+        database.knowledge_engines.clear()
         return self._to_record(self._require_entry(entry_id))
 
     def unregister(self, entry_id: str) -> None:
@@ -135,7 +137,7 @@ class BaseRegistryService(IBaseRegistryService):
             path.unlink()
 
         if entry.is_active and force and replacement is None:
-            self._clear_knowledge_engine()
+            database.knowledge_engines.clear()
 
     def rename(self, entry_id: str, display_name: str) -> RegistryEntryRecord:
         entry = self._require_entry(entry_id)
@@ -184,12 +186,58 @@ class BaseRegistryService(IBaseRegistryService):
         self.select_working_base_id(entry.entry_id)
         return self._to_working_base(self._to_record(entry))
 
+    def get_working_base(self, base_ref: str | None, write: bool) -> WorkingBaseRecord:
+        self._ensure_default()
+
+        if base_ref is not None:
+            return self._to_working_base(self._to_record(self._visible_entry(base_ref, write)))
+
+        if write:
+            writable = [
+                entry
+                for entry in self._base_registry_repository.list_entries()
+                if entry.agent_access_mode is AgentAccessMode.WRITE
+            ]
+
+            if len(writable) > 1:
+                raise WorkingBaseMutationTargetError()
+
+        if selected_working_entry_id is not None:
+            working = self._base_registry_repository.get(selected_working_entry_id)
+
+            if working is not None and working.agent_access_mode is not AgentAccessMode.HIDDEN:
+                return self._to_working_base(
+                    self._to_record(self._writable_if_needed(working, write))
+                )
+
+        active = self._base_registry_repository.get_active()
+
+        if active is not None and active.agent_access_mode is not AgentAccessMode.HIDDEN:
+            return self._to_working_base(self._to_record(self._writable_if_needed(active, write)))
+
+        raise WorkingBaseNotFoundError(base_ref or "local:")
+
+    def _visible_entry(self, base_ref: str, write: bool) -> RegistryEntry:
+        entry = self._require_entry(self._entry_id_from_base_ref(base_ref))
+
+        if entry.agent_access_mode is AgentAccessMode.HIDDEN:
+            raise WorkingBaseNotFoundError(base_ref)
+
+        return self._writable_if_needed(entry, write)
+
+    @staticmethod
+    def _writable_if_needed(entry: RegistryEntry, write: bool) -> RegistryEntry:
+        if write and entry.agent_access_mode is AgentAccessMode.READ:
+            raise WorkingBaseReadOnlyError(f"local:{entry.entry_id}")
+
+        return entry
+
     @staticmethod
     def select_working_base_id(entry_id: str | None) -> None:
         global selected_working_entry_id
 
         selected_working_entry_id = entry_id
-        BaseRegistryService._clear_knowledge_engine()
+        database.knowledge_engines.clear()
 
     def _ensure_default(self) -> None:
         if self._base_registry_repository.list_entries():
@@ -311,9 +359,3 @@ class BaseRegistryService(IBaseRegistryService):
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    @staticmethod
-    def _clear_knowledge_engine() -> None:
-        from dependencies import get_engine
-
-        get_engine.cache_clear()

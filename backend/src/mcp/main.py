@@ -4,6 +4,7 @@ from typing import cast
 
 from . import attachments as attachment_tools
 from . import bases as bases_tools
+from . import embeddings as embedding_tools
 from . import links as link_tools
 from . import pages as pages_tools
 from . import smart_folders as smart_folder_tools
@@ -22,6 +23,7 @@ link_tools.register(mcp)
 bases_tools.register(mcp)
 attachment_tools.register(mcp)
 smart_folder_tools.register(mcp)
+embedding_tools.register(mcp)
 
 
 def main() -> None:
