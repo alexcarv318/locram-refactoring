@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 import database
 from database import apply_migrations, create_session_factory, create_sqlite_engine
+from interfaces.repositories.backups import IBackupRepository
 from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.repositories.changes import IChangeRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
@@ -15,6 +16,7 @@ from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
 from interfaces.services.attachments import IAttachmentService
+from interfaces.services.backups import IBackupService
 from interfaces.services.bases import IBaseRegistryService
 from interfaces.services.bridge import IBridgeService
 from interfaces.services.changes import IChangeService
@@ -22,6 +24,7 @@ from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
 from interfaces.services.links import ILinkService
 from interfaces.services.pages import IPageService
 from interfaces.services.smart_folders import ISmartFolderService
+from repositories.backups import BackupRepository
 from repositories.bases import BaseRegistryRepository
 from repositories.changes import ChangeRepository
 from repositories.embeddings import EmbeddingRepository
@@ -30,6 +33,7 @@ from repositories.pages import PageRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.bases import WorkingBaseRecord
 from services.attachments import AttachmentService
+from services.backups import BackupService
 from services.bases import BaseRegistryService
 from services.bridge import BridgeService
 from services.changes import ChangeService
@@ -169,6 +173,18 @@ def get_bridge_service(
 
 def get_attachment_service() -> IAttachmentService:
     return AttachmentService(attachments_path=database.attachments_path)
+
+
+def get_backup_repository(base_ref: str | None, write: bool) -> IBackupRepository:
+    working_base = get_working_base(base_ref=base_ref, write=write)
+
+    return BackupRepository(source_path=Path(working_base.path))
+
+
+def get_backup_service(base_ref: str | None = Query(default=None)) -> IBackupService:
+    return BackupService(
+        backup_repository=get_backup_repository(base_ref=base_ref, write=False)
+    )
 
 
 def get_embedding_provider() -> IEmbeddingProvider:

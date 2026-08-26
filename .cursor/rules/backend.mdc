@@ -216,4 +216,5 @@ ruff check . --fix
 - Smart folders are JSON presets plus eight built-in scopes. Pages embed filters; matching is metadata-only.
 - Embeddings store float32 vectors on the page SQLite file. Hybrid search fuses FTS with cosine similarity and falls back to FTS when no provider is configured. Settings choose hosted, Hugging Face, or Ollama. Hosted stays not-ready until Access supplies device auth.
 - Changes are SQLite triggers on pages/links. Do not inject a change service into page or link writes.
+- Backups are SQLite snapshot files next to the knowledge file (`<db-parent>/backups/locram-<trigger>-<timestamp>.db`). No SQL model. Restore writes `pre_restore` first.
 - Do not start the next feature unless asked.

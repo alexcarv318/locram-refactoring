@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import cast
 
 from . import attachments as attachment_tools
+from . import backups as backup_tools
 from . import bases as bases_tools
 from . import embeddings as embedding_tools
 from . import links as link_tools
@@ -24,6 +25,7 @@ bases_tools.register(mcp)
 attachment_tools.register(mcp)
 smart_folder_tools.register(mcp)
 embedding_tools.register(mcp)
+backup_tools.register(mcp)
 
 
 def main() -> None:

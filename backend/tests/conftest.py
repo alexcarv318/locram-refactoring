@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 import database
 import mcp.attachments as mcp_attachments
+import mcp.backups as mcp_backups
 import mcp.bases as mcp_bases
 import mcp.embeddings as mcp_embeddings
 import mcp.links as mcp_links
@@ -15,7 +16,12 @@ import mcp.pages as mcp_pages
 import mcp.smart_folders as mcp_smart_folders
 import services.bases as bases_state
 from api.main import app
-from database import apply_migrations, create_session_factory, create_sqlite_engine
+from database import (
+    apply_migrations,
+    create_session_factory,
+    create_sqlite_engine,
+    open_knowledge_session,
+)
 from dependencies import (
     get_attachment_service,
     get_base_registry_service,
@@ -25,12 +31,16 @@ from dependencies import (
     get_registry_engine,
     get_smart_folder_service,
 )
+from models.bases import BaseMetadata
+from repositories.backups import BackupRepository
 from repositories.bases import BaseRegistryRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
 from repositories.smart_folders import SmartFolderRepository
+from schemas.pages import PageCreate
 from services.attachments import AttachmentService
+from services.backups import BackupService
 from services.bases import BaseRegistryService
 from services.embeddings import EmbeddingService, NullEmbeddingProvider
 from services.links import LinkService
@@ -118,6 +128,19 @@ def embedding_service(db: Session) -> EmbeddingService:
 @pytest.fixture
 def attachment_service(tmp_path: Path) -> AttachmentService:
     return AttachmentService(tmp_path / "attachments")
+
+
+@pytest.fixture
+def backup_service(tmp_path: Path) -> BackupService:
+    source_path = tmp_path / "notes.db"
+    session = open_knowledge_session(source_path)
+    session.add(BaseMetadata(base_id="base-one", display_name="Notes"))
+    session.commit()
+    page_service = PageService(PageRepository(session), LinkRepository(session))
+    page_service.create_page(PageCreate(title="Kept", content="original"))
+    session.close()
+
+    return BackupService(backup_repository=BackupRepository(source_path=source_path))
 
 
 @pytest.fixture
@@ -245,3 +268,13 @@ def mcp_embedding_service(
     yield embedding_service
 
     mcp_embeddings.get_embedding_service = previous
+
+
+@pytest.fixture
+def mcp_backup_service(backup_service: BackupService) -> Iterator[BackupService]:
+    previous = mcp_backups.get_backup_service
+    mcp_backups.get_backup_service = lambda base_ref=None, write=False: backup_service
+
+    yield backup_service
+
+    mcp_backups.get_backup_service = previous

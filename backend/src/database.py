@@ -32,6 +32,9 @@ class KnowledgeEngines:
         return engine
 
     def clear(self) -> None:
+        for engine in self.engines.values():
+            engine.dispose()
+
         self.engines.clear()
 
 

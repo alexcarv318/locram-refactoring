@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.attachments import attachments_router
+from api.backups import backups_router
 from api.bases import bases_router
 from api.bridge import bridge_router
 from api.changes import changes_router
@@ -20,6 +21,7 @@ app.include_router(bases_router)
 app.include_router(bridge_router)
 app.include_router(changes_router)
 app.include_router(attachments_router)
+app.include_router(backups_router)
 app.include_router(presets_router)
 app.include_router(notes_router)
 app.include_router(embeddings_router)
