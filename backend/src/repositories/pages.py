@@ -150,6 +150,15 @@ class PageRepository(BaseRepository, IPageRepository):
         )
         return list(self.db.scalars(statement))
 
+    def list_visible_pages(self) -> list[PageSummary]:
+        statement = (
+            select(Page)
+            .where(Page.status != PageStatus.TO_DELETE)
+            .order_by(Page.updated_at.desc())
+        )
+
+        return [self._to_summary(page) for page in self.db.scalars(statement)]
+
     def _to_summary(self, page: Page) -> PageSummary:
         child_count = self.db.scalar(
             select(func.count())

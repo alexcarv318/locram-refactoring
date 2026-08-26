@@ -2,9 +2,11 @@ import importlib
 from collections.abc import Callable
 from typing import cast
 
+from . import attachments as attachment_tools
 from . import bases as bases_tools
 from . import links as link_tools
 from . import pages as pages_tools
+from . import smart_folders as smart_folder_tools
 from .protocol import MCPServerApp
 
 
@@ -18,6 +20,8 @@ mcp = _build_server()
 pages_tools.register(mcp)
 link_tools.register(mcp)
 bases_tools.register(mcp)
+attachment_tools.register(mcp)
+smart_folder_tools.register(mcp)
 
 
 def main() -> None:

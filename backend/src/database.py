@@ -18,6 +18,8 @@ class BaseRepository:
 
 host_state_path = Path.home() / ".locram" / "host-state.db"
 knowledge_path = Path.home() / ".locram" / "locram.db"
+attachments_path = Path.home() / ".locram" / "attachments"
+filter_presets_path = Path.home() / ".locram" / "preferences" / "filter-presets.json"
 
 
 def apply_migrations(engine: Engine) -> None:

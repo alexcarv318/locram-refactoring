@@ -41,3 +41,6 @@ class IPageRepository(ABC):
 
     @abstractmethod
     def list_children(self, parent_id: str) -> list[Page]: ...
+
+    @abstractmethod
+    def list_visible_pages(self) -> list[PageSummary]: ...

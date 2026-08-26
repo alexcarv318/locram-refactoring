@@ -63,6 +63,7 @@ pages_service = (
 - If `PageService` needs a page repository, it takes `page_repository: IPageRepository` in `__init__`.
 - Name every interface `I<Class>`: `IPageService`, `IPageRepository`.
 - Exactly one repository and one service per feature.
+- Skip the SQL model and Alembic revision when the feature is not stored in SQLite. Attachments are files under `attachments_path`. Smart-folder presets are JSON under `filter_presets_path`.
 - Exactly one implementation per service or repository unless the business logic literally needs more than one.
 - As many service modules as features. Prefer `/services` with `pages.py`, not `/services/pages/page_service.py`.
 - Prefer one module inside a package. Very few exceptions.
@@ -208,4 +209,6 @@ ruff check . --fix
 
 - Pages first. A page lives in one SQLite file. Bases only choose which file later.
 - Bridge is HTTP only: `GET /api/health` and `GET /api/runtime`. No MCP tools.
+- Attachments are files under `attachments_path`, referenced from page content as `![[filename]]`.
+- Smart folders are JSON presets plus eight built-in scopes. Pages embed filters; matching is metadata-only.
 - Do not start the next feature unless asked.

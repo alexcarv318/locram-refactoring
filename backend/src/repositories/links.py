@@ -51,3 +51,12 @@ class LinkRepository(BaseRepository, ILinkRepository):
             or_(Link.source_id == page_id, Link.target_id == page_id)
         )
         return list(self.db.scalars(statement))
+
+    def list_linked_page_ids(self) -> list[str]:
+        linked_ids: set[str] = set()
+
+        for source_id, target_id in self.db.execute(select(Link.source_id, Link.target_id)):
+            linked_ids.add(source_id)
+            linked_ids.add(target_id)
+
+        return list(linked_ids)

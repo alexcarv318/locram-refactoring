@@ -11,17 +11,23 @@ from database import apply_migrations, create_session_factory, create_sqlite_eng
 from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.repositories.smart_folders import ISmartFolderRepository
+from interfaces.services.attachments import IAttachmentService
 from interfaces.services.bases import IBaseRegistryService
 from interfaces.services.bridge import IBridgeService
 from interfaces.services.links import ILinkService
 from interfaces.services.pages import IPageService
+from interfaces.services.smart_folders import ISmartFolderService
 from repositories.bases import BaseRegistryRepository
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
+from repositories.smart_folders import SmartFolderRepository
+from services.attachments import AttachmentService
 from services.bases import BaseRegistryService, selected_working_entry_id
 from services.bridge import BridgeService
 from services.links import LinkService
 from services.pages import PageService
+from services.smart_folders import SmartFolderService
 
 
 @lru_cache
@@ -132,3 +138,25 @@ def get_bridge_service(
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
 ) -> IBridgeService:
     return BridgeService(base_registry_service)
+
+
+def get_attachment_service() -> IAttachmentService:
+    return AttachmentService(database.attachments_path)
+
+
+def get_smart_folder_repository() -> ISmartFolderRepository:
+    return SmartFolderRepository(database.filter_presets_path)
+
+
+def get_smart_folder_service(
+    smart_folder_repository: ISmartFolderRepository = Depends(get_smart_folder_repository),
+    page_repository: IPageRepository = Depends(get_page_repository),
+    link_repository: ILinkRepository = Depends(get_link_repository),
+    link_service: ILinkService = Depends(get_link_service),
+) -> ISmartFolderService:
+    return SmartFolderService(
+        smart_folder_repository,
+        page_repository,
+        link_repository,
+        link_service,
+    )

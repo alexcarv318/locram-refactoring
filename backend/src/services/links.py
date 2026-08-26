@@ -116,10 +116,36 @@ class LinkService(ILinkService):
         if seed is None:
             raise PageNotFoundError(page_id)
 
+        nodes, links = self.collect_neighborhood([page_id], expand_hops)
+
+        return PageGraph(
+            selected_page_id=seed.id,
+            scope_kind=self._scope_kind(seed.type),
+            nodes=nodes,
+            links=links,
+        )
+
+    def collect_neighborhood(
+        self,
+        seed_ids: list[str],
+        expand_hops: int,
+    ) -> tuple[list[PageGraphNode], list[PageGraphLink]]:
         hops = min(max(expand_hops, 1), 5)
-        pages = {seed.id: seed}
+        pages: dict[str, Page] = {}
         edges: list[PageGraphLink] = []
-        frontier = [seed.id]
+        frontier: list[str] = []
+
+        for seed_id in seed_ids:
+            page = self._page_repository.get(seed_id)
+
+            if page is None:
+                continue
+
+            if page.id in pages:
+                continue
+
+            pages[page.id] = page
+            frontier.append(page.id)
 
         for _hop in range(hops):
             next_frontier: list[str] = []
@@ -132,12 +158,7 @@ class LinkService(ILinkService):
 
             frontier = next_frontier
 
-        return PageGraph(
-            selected_page_id=seed.id,
-            scope_kind=self._scope_kind(seed.type),
-            nodes=[self._to_node(page) for page in pages.values()],
-            links=edges,
-        )
+        return [self._to_node(page) for page in pages.values()], edges
 
     def _add_parent_edge(
         self,

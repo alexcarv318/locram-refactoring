@@ -6,6 +6,8 @@ from schemas.links import (
     LinkedPagesResponse,
     LinkType,
     PageGraph,
+    PageGraphLink,
+    PageGraphNode,
     UnlinkedPagesResponse,
 )
 
@@ -37,3 +39,10 @@ class ILinkService(ABC):
 
     @abstractmethod
     def get_page_graph(self, page_id: str, expand_hops: int) -> PageGraph: ...
+
+    @abstractmethod
+    def collect_neighborhood(
+        self,
+        seed_ids: list[str],
+        expand_hops: int,
+    ) -> tuple[list[PageGraphNode], list[PageGraphLink]]: ...

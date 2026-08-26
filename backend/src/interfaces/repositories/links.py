@@ -18,3 +18,6 @@ class ILinkRepository(ABC):
 
     @abstractmethod
     def list_for_page(self, page_id: str) -> list[Link]: ...
+
+    @abstractmethod
+    def list_linked_page_ids(self) -> list[str]: ...
