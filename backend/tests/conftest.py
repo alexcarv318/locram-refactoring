@@ -13,6 +13,7 @@ import mcp.bases as mcp_bases
 import mcp.embeddings as mcp_embeddings
 import mcp.exports as mcp_exports
 import mcp.links as mcp_links
+import mcp.merges as mcp_merges
 import mcp.pages as mcp_pages
 import mcp.smart_folders as mcp_smart_folders
 import services.bases as bases_state
@@ -38,6 +39,7 @@ from repositories.bases import BaseRegistryRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
 from repositories.links import LinkRepository
+from repositories.merges import MergeRepository
 from repositories.pages import PageRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.links import LinkType
@@ -48,6 +50,7 @@ from services.bases import BaseRegistryService
 from services.embeddings import EmbeddingService, NullEmbeddingProvider
 from services.exports import ExportService
 from services.links import LinkService
+from services.merges import MergeService
 from services.pages import PageService
 from services.smart_folders import SmartFolderService
 
@@ -163,6 +166,47 @@ def export_service(tmp_path: Path) -> Iterator[ExportService]:
     )
 
     yield service
+
+    session.close()
+
+
+@pytest.fixture
+def merge_bundle(
+    tmp_path: Path,
+) -> Iterator[tuple[MergeService, ExportService, PageService]]:
+    source_path = tmp_path / "notes.db"
+    session = open_knowledge_session(source_path)
+    session.add(BaseMetadata(base_id="base-one", display_name="Notes"))
+    session.commit()
+    page_repository = PageRepository(session)
+    link_repository = LinkRepository(session)
+    page_service = PageService(page_repository, link_repository)
+    link_service = LinkService(link_repository, page_repository)
+    first = page_service.create_page(PageCreate(title="Alpha", content="first"))
+    second = page_service.create_page(
+        PageCreate(title="Beta", content="second", parent_id=first.id)
+    )
+    page_service.create_page(PageCreate(title="Gamma", content="third"))
+    link_service.link_pages(first.id, second.id, LinkType.RELATED)
+
+    merge_service = MergeService(
+        merge_repository=MergeRepository(session),
+        page_repository=page_repository,
+        link_repository=link_repository,
+        backup_service=BackupService(backup_repository=BackupRepository(source_path=source_path)),
+    )
+    export_service = ExportService(
+        export_repository=ExportRepository(source_path=source_path),
+        page_repository=page_repository,
+        smart_folder_service=SmartFolderService(
+            SmartFolderRepository(tmp_path / "preferences" / "filter-presets.json"),
+            page_repository,
+            link_repository,
+            link_service,
+        ),
+    )
+
+    yield merge_service, export_service, page_service
 
     session.close()
 
@@ -325,3 +369,16 @@ def mcp_export_service(export_service: ExportService) -> Iterator[ExportService]
     yield export_service
 
     mcp_exports.get_export_service = previous
+
+
+@pytest.fixture
+def mcp_merge_service(
+    merge_bundle: tuple[MergeService, ExportService, PageService],
+) -> Iterator[MergeService]:
+    merge_service, _export_service, _page_service = merge_bundle
+    previous = mcp_merges.get_merge_service
+    mcp_merges.get_merge_service = lambda base_ref=None, write=False: merge_service
+
+    yield merge_service
+
+    mcp_merges.get_merge_service = previous

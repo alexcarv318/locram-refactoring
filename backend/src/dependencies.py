@@ -14,6 +14,7 @@ from interfaces.repositories.changes import IChangeRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.exports import IExportRepository
 from interfaces.repositories.links import ILinkRepository
+from interfaces.repositories.merges import IMergeRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
 from interfaces.services.attachments import IAttachmentService
@@ -24,6 +25,7 @@ from interfaces.services.changes import IChangeService
 from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
 from interfaces.services.exports import IExportService
 from interfaces.services.links import ILinkService
+from interfaces.services.merges import IMergeService
 from interfaces.services.pages import IPageService
 from interfaces.services.smart_folders import ISmartFolderService
 from repositories.backups import BackupRepository
@@ -32,6 +34,7 @@ from repositories.changes import ChangeRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
 from repositories.links import LinkRepository
+from repositories.merges import MergeRepository
 from repositories.pages import PageRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.bases import WorkingBaseRecord
@@ -43,6 +46,7 @@ from services.changes import ChangeService
 from services.embeddings import EmbeddingService, build_embedding_provider
 from services.exports import ExportService
 from services.links import LinkService
+from services.merges import MergeService
 from services.pages import PageService
 from services.smart_folders import SmartFolderService
 
@@ -141,6 +145,10 @@ def get_change_repository(db: Session = Depends(get_db)) -> IChangeRepository:
     return ChangeRepository(db)
 
 
+def get_merge_repository(db: Session = Depends(get_db)) -> IMergeRepository:
+    return MergeRepository(db)
+
+
 def get_embedding_repository(db: Session = Depends(get_db)) -> IEmbeddingRepository:
     return EmbeddingRepository(db)
 
@@ -236,4 +244,18 @@ def get_export_service(
         export_repository=get_export_repository(base_ref=base_ref, write=False),
         page_repository=page_repository,
         smart_folder_service=smart_folder_service,
+    )
+
+
+def get_merge_service(
+    merge_repository: IMergeRepository = Depends(get_merge_repository),
+    page_repository: IPageRepository = Depends(get_page_repository),
+    link_repository: ILinkRepository = Depends(get_link_repository),
+    backup_service: IBackupService = Depends(get_backup_service),
+) -> IMergeService:
+    return MergeService(
+        merge_repository=merge_repository,
+        page_repository=page_repository,
+        link_repository=link_repository,
+        backup_service=backup_service,
     )
