@@ -1,0 +1,92 @@
+from dependencies import (
+    get_export_repository,
+    get_link_repository,
+    get_page_repository,
+    get_session,
+    get_smart_folder_repository,
+)
+from dependencies import get_link_service as load_link_service
+from dependencies import get_smart_folder_service as load_smart_folder_service
+from interfaces.services.exports import IExportService
+from schemas.exports import (
+    ArtifactInspection,
+    ExportDeletedResponse,
+    ExportRecord,
+    ExportResult,
+    ExportScope,
+)
+from schemas.smart_folders import FilterState
+from services.exports import ExportService
+
+from .protocol import MCPServerApp
+
+
+def get_export_service(base_ref: str | None = None, write: bool = False) -> IExportService:
+    db = get_session(base_ref=base_ref, write=write)
+    page_repository = get_page_repository(db=db)
+    link_repository = get_link_repository(db=db)
+
+    return ExportService(
+        export_repository=get_export_repository(base_ref=base_ref, write=write),
+        page_repository=page_repository,
+        smart_folder_service=load_smart_folder_service(
+            smart_folder_repository=get_smart_folder_repository(),
+            page_repository=page_repository,
+            link_repository=link_repository,
+            link_service=load_link_service(
+                link_repository=link_repository,
+                page_repository=page_repository,
+            ),
+        ),
+    )
+
+
+def artifact_list_exports(base_ref: str | None = None) -> list[ExportRecord]:
+    return get_export_service(base_ref=base_ref).list_exports()
+
+
+def artifact_inspect_artifact(path: str, base_ref: str | None = None) -> ArtifactInspection:
+    return get_export_service(base_ref=base_ref).inspect_artifact(path)
+
+
+def artifact_delete_export(
+    artifact_id: str,
+    base_ref: str | None = None,
+) -> ExportDeletedResponse:
+    return get_export_service(base_ref=base_ref, write=True).delete_export_by_artifact_id(
+        artifact_id
+    )
+
+
+def export_subgraph(
+    page_ids: list[str] | None = None,
+    filter_state: FilterState | None = None,
+    preset_id: str | None = None,
+    page_type: str | None = None,
+    status: str | None = None,
+    subject: str | None = None,
+    tag: str | None = None,
+    include_all: bool = False,
+    package_label: str | None = None,
+    base_ref: str | None = None,
+) -> ExportResult:
+    return get_export_service(base_ref=base_ref, write=True).export_subgraph(
+        ExportScope(
+            page_ids=page_ids or [],
+            filter=filter_state,
+            preset_id=preset_id,
+            page_type=page_type,
+            status=status,
+            subject=subject,
+            tag=tag,
+            include_all=include_all,
+            package_label=package_label,
+        )
+    )
+
+
+def register(mcp: MCPServerApp) -> None:
+    mcp.tool()(artifact_list_exports)
+    mcp.tool()(artifact_inspect_artifact)
+    mcp.tool()(artifact_delete_export)
+    mcp.tool()(export_subgraph)

@@ -48,3 +48,10 @@ class ISmartFolderService(ABC):
         filter_state: FilterState | None,
         expand_hops: int,
     ) -> SmartFolderGraph: ...
+
+    @abstractmethod
+    def matching_page_ids(
+        self,
+        preset_id: str | None,
+        filter_state: FilterState | None,
+    ) -> list[str]: ...

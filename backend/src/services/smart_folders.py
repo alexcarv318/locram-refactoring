@@ -130,6 +130,18 @@ class SmartFolderService(ISmartFolderService):
         filter_state: FilterState | None,
         expand_hops: int,
     ) -> SmartFolderGraph:
+        return self._graph(
+            self.matching_page_ids(preset_id, filter_state),
+            "smart_folder",
+            preset_id,
+            expand_hops,
+        )
+
+    def matching_page_ids(
+        self,
+        preset_id: str | None,
+        filter_state: FilterState | None,
+    ) -> list[str]:
         has_preset = preset_id is not None
         has_filter = filter_state is not None
 
@@ -141,22 +153,15 @@ class SmartFolderService(ISmartFolderService):
         now = datetime.now(UTC)
 
         if preset_id is not None and preset_id in BUILT_IN_SCOPE_IDS:
-            seed_ids = self._match_scope(preset_id, summaries, linked_ids, now)
-
-            return self._graph(seed_ids, "smart_folder", preset_id, expand_hops)
+            return self._match_scope(preset_id, summaries, linked_ids, now)
 
         if preset_id is not None:
-            preset = self.get_preset(preset_id)
-            seed_ids = self._match_filter(summaries, preset.filter)
-
-            return self._graph(seed_ids, "smart_folder", preset_id, expand_hops)
+            return self._match_filter(summaries, self.get_preset(preset_id).filter)
 
         if filter_state is None:
             raise SmartFolderPreviewError()
 
-        seed_ids = self._match_filter(summaries, filter_state)
-
-        return self._graph(seed_ids, "smart_folder", None, expand_hops)
+        return self._match_filter(summaries, filter_state)
 
     def _graph(
         self,
