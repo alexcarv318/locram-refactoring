@@ -15,6 +15,7 @@ import mcp.exports as mcp_exports
 import mcp.links as mcp_links
 import mcp.merges as mcp_merges
 import mcp.pages as mcp_pages
+import mcp.sharing as mcp_sharing
 import mcp.smart_folders as mcp_smart_folders
 import services.bases as bases_state
 from api.main import app
@@ -41,6 +42,7 @@ from repositories.exports import ExportRepository
 from repositories.links import LinkRepository
 from repositories.merges import MergeRepository
 from repositories.pages import PageRepository
+from repositories.sharing import SharingRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.links import LinkType
 from schemas.pages import PageCreate
@@ -52,6 +54,7 @@ from services.exports import ExportService
 from services.links import LinkService
 from services.merges import MergeService
 from services.pages import PageService
+from services.sharing import SharingService
 from services.smart_folders import SmartFolderService
 
 
@@ -245,6 +248,17 @@ def base_registry_service() -> BaseRegistryService:
 
 
 @pytest.fixture
+def sharing_service(base_registry_service: BaseRegistryService) -> SharingService:
+    base_registry_service.list_bases()
+    session = create_session_factory(get_registry_engine())()
+
+    return SharingService(
+        sharing_repository=SharingRepository(session),
+        base_registry_repository=BaseRegistryRepository(session),
+    )
+
+
+@pytest.fixture
 def client(
     services: tuple[PageService, LinkService],
     base_registry_service: BaseRegistryService,
@@ -382,3 +396,13 @@ def mcp_merge_service(
     yield merge_service
 
     mcp_merges.get_merge_service = previous
+
+
+@pytest.fixture
+def mcp_sharing_service(sharing_service: SharingService) -> Iterator[SharingService]:
+    previous = mcp_sharing.get_sharing_service
+    mcp_sharing.get_sharing_service = lambda: sharing_service
+
+    yield sharing_service
+
+    mcp_sharing.get_sharing_service = previous

@@ -12,6 +12,7 @@ from api.exports import exports_router
 from api.links import links_router
 from api.merges import merges_router
 from api.pages import pages_router
+from api.sharing import sharing_router
 from api.smart_folders import notes_router, presets_router
 from exceptions.app import AppError
 
@@ -26,6 +27,7 @@ app.include_router(attachments_router)
 app.include_router(backups_router)
 app.include_router(exports_router)
 app.include_router(merges_router)
+app.include_router(sharing_router)
 app.include_router(presets_router)
 app.include_router(notes_router)
 app.include_router(embeddings_router)

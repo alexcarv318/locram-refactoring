@@ -251,7 +251,7 @@ class EmbeddingService(IEmbeddingService):
 
     def hybrid_search(self, query: str, limit: int) -> HybridSearchResult:
         fts_hits = self._page_repository.search(query, limit * 2)
-        coverage = self._embedding_repository.get_coverage(self._model_or_none())
+        coverage = self._embedding_repository.get_coverage(self._active_model())
 
         if not self._embedding_provider.ready:
             return self._lexical_only(fts_hits, limit, coverage, "SEMANTIC_NOT_CONFIGURED")
@@ -278,7 +278,7 @@ class EmbeddingService(IEmbeddingService):
 
     def capability_status(self) -> SearchCapabilityStatus:
         provider_ready = self._embedding_provider.ready
-        model = self._model_or_none()
+        model = self._active_model()
 
         return SearchCapabilityStatus(
             fts_ready=True,
@@ -431,8 +431,8 @@ class EmbeddingService(IEmbeddingService):
             ]
         )
 
+    @staticmethod
     def _lexical_only(
-        self,
         fts_hits: list[PageSearchHit],
         limit: int,
         coverage: EmbeddingCoverage,
@@ -505,7 +505,7 @@ class EmbeddingService(IEmbeddingService):
 
         return ordered[:limit]
 
-    def _model_or_none(self) -> str | None:
+    def _active_model(self) -> str | None:
         if not self._embedding_provider.ready:
             return None
 

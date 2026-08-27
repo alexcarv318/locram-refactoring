@@ -52,7 +52,7 @@ class MergeService(IMergeService):
                 duplicates.extend(self._duplicate_candidates(page))
                 continue
 
-            if self._same_content(existing, page):
+            if existing.content == page.content:
                 already_present_count += 1
                 mergeable_ids.add(page.id)
                 continue
@@ -192,16 +192,6 @@ class MergeService(IMergeService):
             )
 
         return candidates
-
-    def _same_content(self, existing: Page, incoming: MergePage) -> bool:
-        if (
-            existing.content_hash is not None
-            and incoming.content_hash is not None
-            and existing.content_hash == incoming.content_hash
-        ):
-            return True
-
-        return existing.content == incoming.content
 
     def _link_exists(self, link: MergeLink) -> bool:
         for existing in self._link_repository.list_for_page(link.source_id):

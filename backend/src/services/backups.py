@@ -11,7 +11,7 @@ class BackupService(IBackupService):
         self._backup_repository = backup_repository
 
     def create_backup(self, trigger: str) -> BackupRecord:
-        return self._backup_repository.create(self._safe_trigger(trigger))
+        return self._backup_repository.create(self._sanitize_trigger(trigger))
 
     def list_backups(self) -> list[BackupRecord]:
         return self._backup_repository.list_backups()
@@ -33,7 +33,7 @@ class BackupService(IBackupService):
         path: str | None,
         allow_base_replacement: bool,
     ) -> RestoreResult:
-        snapshot = self._snapshot(filename=filename, path=path)
+        snapshot = self._restore_path(filename=filename, path=path)
         current_base_id = self._backup_repository.current_base_id()
         snapshot_base_id = self._backup_repository.read_base_id(snapshot)
 
@@ -56,7 +56,7 @@ class BackupService(IBackupService):
             pre_restore_backup=pre_restore.filename,
         )
 
-    def _snapshot(self, filename: str | None, path: str | None) -> Path:
+    def _restore_path(self, filename: str | None, path: str | None) -> Path:
         if path is not None and path.strip() != "":
             return Path(path).expanduser().resolve()
 
@@ -71,7 +71,7 @@ class BackupService(IBackupService):
         return snapshot
 
     @staticmethod
-    def _safe_trigger(trigger: str) -> str:
+    def _sanitize_trigger(trigger: str) -> str:
         cleaned = "".join(
             character
             for character in trigger.strip()

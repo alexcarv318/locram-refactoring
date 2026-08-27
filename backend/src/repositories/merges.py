@@ -78,8 +78,8 @@ class MergeRepository(BaseRepository, IMergeRepository):
                         content=str(row[2]),
                         type=str(row[3]),
                         status=str(row[4]),
-                        subject=self._string_list(row[5]),
-                        tags=self._string_list(row[6]),
+                        subject=self._parse_json_list(row[5]),
+                        tags=self._parse_json_list(row[6]),
                         parent_id=str(row[7]) if row[7] is not None else None,
                         content_hash=str(row[8]) if row[8] is not None else None,
                         review_interval_days=int(row[9]) if row[9] is not None else 7,
@@ -122,7 +122,7 @@ class MergeRepository(BaseRepository, IMergeRepository):
         return metadata.base_id, metadata.display_name
 
     @staticmethod
-    def _string_list(value: object) -> list[str]:
+    def _parse_json_list(value: object) -> list[str]:
         if value is None:
             return []
 

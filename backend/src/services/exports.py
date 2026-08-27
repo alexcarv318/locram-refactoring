@@ -92,11 +92,11 @@ class ExportService(IExportService):
         return [
             summary.id
             for summary in self._page_repository.list_visible_pages()
-            if self._matches_simple(summary, scope)
+            if self._matches_scope(summary, scope)
         ]
 
     @staticmethod
-    def _matches_simple(summary: PageSummary, scope: ExportScope) -> bool:
+    def _matches_scope(summary: PageSummary, scope: ExportScope) -> bool:
         required_status = scope.status
 
         if required_status is None and not scope.include_all:

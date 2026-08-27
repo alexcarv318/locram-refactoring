@@ -10,6 +10,7 @@ from . import exports as export_tools
 from . import links as link_tools
 from . import merges as merge_tools
 from . import pages as pages_tools
+from . import sharing as sharing_tools
 from . import smart_folders as smart_folder_tools
 from .protocol import MCPServerApp
 
@@ -30,6 +31,7 @@ embedding_tools.register(mcp)
 backup_tools.register(mcp)
 export_tools.register(mcp)
 merge_tools.register(mcp)
+sharing_tools.register(mcp)
 
 
 def main() -> None:

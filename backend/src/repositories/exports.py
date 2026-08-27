@@ -147,8 +147,8 @@ class ExportRepository(IExportRepository):
 
         return candidate
 
+    @staticmethod
     def _copy_pages_and_links(
-        self,
         source: sqlite3.Connection,
         target: sqlite3.Connection,
         page_ids: list[str],
@@ -291,13 +291,13 @@ class ExportRepository(IExportRepository):
             "SELECT COUNT(*) FROM pages WHERE status = 'active'",
         )
         link_count = self._count(connection, "SELECT COUNT(*) FROM links")
-        base_id = self._cell(base_row, 0)
-        display_name = self._cell(base_row, 1)
-        artifact_id = self._cell(artifact_row, 0)
-        artifact_kind = self._cell(artifact_row, 1)
-        source_base_id = self._cell(artifact_row, 2)
-        package_label = self._cell(artifact_row, 3)
-        created_at = self._cell(artifact_row, 4)
+        base_id = self._column_text(base_row, 0)
+        display_name = self._column_text(base_row, 1)
+        artifact_id = self._column_text(artifact_row, 0)
+        artifact_kind = self._column_text(artifact_row, 1)
+        source_base_id = self._column_text(artifact_row, 2)
+        package_label = self._column_text(artifact_row, 3)
+        created_at = self._column_text(artifact_row, 4)
 
         if artifact_kind == "export":
             artifact_class = "scoped_export"
@@ -455,7 +455,7 @@ class ExportRepository(IExportRepository):
         return int(row[0])
 
     @staticmethod
-    def _cell(row: tuple[object, ...] | None, index: int) -> str | None:
+    def _column_text(row: tuple[object, ...] | None, index: int) -> str | None:
         if row is None or row[index] is None:
             return None
 

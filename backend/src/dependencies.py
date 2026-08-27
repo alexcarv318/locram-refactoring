@@ -16,6 +16,7 @@ from interfaces.repositories.exports import IExportRepository
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.merges import IMergeRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.repositories.sharing import ISharingRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
 from interfaces.services.attachments import IAttachmentService
 from interfaces.services.backups import IBackupService
@@ -27,6 +28,7 @@ from interfaces.services.exports import IExportService
 from interfaces.services.links import ILinkService
 from interfaces.services.merges import IMergeService
 from interfaces.services.pages import IPageService
+from interfaces.services.sharing import ISharingService
 from interfaces.services.smart_folders import ISmartFolderService
 from repositories.backups import BackupRepository
 from repositories.bases import BaseRegistryRepository
@@ -36,6 +38,7 @@ from repositories.exports import ExportRepository
 from repositories.links import LinkRepository
 from repositories.merges import MergeRepository
 from repositories.pages import PageRepository
+from repositories.sharing import SharingRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.bases import WorkingBaseRecord
 from services.attachments import AttachmentService
@@ -48,6 +51,7 @@ from services.exports import ExportService
 from services.links import LinkService
 from services.merges import MergeService
 from services.pages import PageService
+from services.sharing import SharingService
 from services.smart_folders import SmartFolderService
 
 
@@ -151,6 +155,12 @@ def get_merge_repository(db: Session = Depends(get_db)) -> IMergeRepository:
 
 def get_embedding_repository(db: Session = Depends(get_db)) -> IEmbeddingRepository:
     return EmbeddingRepository(db)
+
+
+def get_sharing_repository(
+    db: Session = Depends(get_registry_db),
+) -> ISharingRepository:
+    return SharingRepository(db)
 
 
 def get_smart_folder_repository() -> ISmartFolderRepository:
@@ -258,4 +268,14 @@ def get_merge_service(
         page_repository=page_repository,
         link_repository=link_repository,
         backup_service=backup_service,
+    )
+
+
+def get_sharing_service(
+    sharing_repository: ISharingRepository = Depends(get_sharing_repository),
+    base_registry_repository: IBaseRegistryRepository = Depends(get_base_registry_repository),
+) -> ISharingService:
+    return SharingService(
+        sharing_repository=sharing_repository,
+        base_registry_repository=base_registry_repository,
     )
