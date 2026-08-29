@@ -1,4 +1,12 @@
-from dependencies import get_base_registry_repository, get_registry_session
+from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
+    get_base_registry_repository,
+    get_registry_session,
+)
 from dependencies import get_base_registry_service as load_base_registry_service
 from interfaces.services.bases import IBaseRegistryService
 from schemas.bases import AgentAccessMode, RegistryEntryRecord, WorkingBaseRecord
@@ -7,7 +15,15 @@ from .protocol import MCPServerApp
 
 
 def get_base_registry_service() -> IBaseRegistryService:
-    return load_base_registry_service(get_base_registry_repository(get_registry_session()))
+    return load_base_registry_service(
+        get_base_registry_repository(get_registry_session()),
+        get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
+    )
 
 
 def base_register_base(

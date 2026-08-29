@@ -1,4 +1,13 @@
-from dependencies import get_base_registry_repository, get_registry_session, get_sharing_repository
+from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
+    get_base_registry_repository,
+    get_registry_session,
+    get_sharing_repository,
+)
 from dependencies import get_sharing_service as load_sharing_service
 from interfaces.services.sharing import ISharingService
 from schemas.sharing import (
@@ -18,6 +27,12 @@ def get_sharing_service() -> ISharingService:
     return load_sharing_service(
         sharing_repository=get_sharing_repository(db=session),
         base_registry_repository=get_base_registry_repository(db=session),
+        access_service=get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
     )
 
 

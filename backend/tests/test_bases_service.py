@@ -114,7 +114,11 @@ def test_working_base_select_hides_hidden(
     selected = base_registry_service.select_working_base(f"local:{visible.entry_id}")
     current = base_registry_service.get_current_working_base()
 
-    assert [item.entry_id for item in listed] == [visible.entry_id]
+    assert [item.entry_id for item in listed if item.kind == "local"] == [visible.entry_id]
+    assert {item.base_ref for item in listed if item.kind == "managed"} == {
+        "managed:ggl",
+        "managed:documentation",
+    }
     assert selected.is_current_working_base is True
     assert current is not None
     assert current.entry_id == visible.entry_id
@@ -122,8 +126,11 @@ def test_working_base_select_hides_hidden(
     with pytest.raises(WorkingBaseNotFoundError):
         base_registry_service.select_working_base(f"local:{hidden.entry_id}")
 
-    with pytest.raises(WorkingBaseNotFoundError):
-        base_registry_service.select_working_base("managed:documentation")
+    managed = base_registry_service.select_working_base("managed:documentation")
+
+    assert managed.kind == "managed"
+    assert managed.base_ref == "managed:documentation"
+    assert managed.agent_access_mode is AgentAccessMode.READ
 
     with pytest.raises(WorkingBaseNotFoundError):
         base_registry_service.select_working_base("local:")
@@ -190,7 +197,10 @@ def test_hidden_active_base_is_not_current_working_base(
     base_registry_service.set_agent_access_mode(active.entry_id, AgentAccessMode.HIDDEN)
 
     assert base_registry_service.get_current_working_base() is None
-    assert base_registry_service.list_working_bases() == []
+    assert [item.kind for item in base_registry_service.list_working_bases()] == [
+        "managed",
+        "managed",
+    ]
 
 
 def test_pages_stay_in_the_base_that_created_them(

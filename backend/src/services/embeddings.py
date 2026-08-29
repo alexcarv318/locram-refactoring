@@ -14,9 +14,11 @@ from exceptions.embeddings import (
     InvalidEmbeddingError,
 )
 from exceptions.pages import PageNotFoundError
+from interfaces.repositories.access import IAccessRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
+from repositories.access import AccessRepository
 from schemas.embeddings import (
     EmbeddingBootstrapResult,
     EmbeddingCoverage,
@@ -25,6 +27,7 @@ from schemas.embeddings import (
     EmbeddingSettingsPatch,
     EmbeddingStoreResponse,
     EmbedRunResult,
+    HostedEmbeddingResponse,
     HuggingFaceValidationResult,
     HybridSearchHit,
     HybridSearchResult,
@@ -153,9 +156,64 @@ class HuggingFaceEmbeddingProvider(IEmbeddingProvider):
         raise EmbeddingProviderError("Hugging Face response missing embedding vector")
 
 
+class LocramHostedEmbeddingProvider(IEmbeddingProvider):
+    def __init__(self, device_id: str, bearer_token: str, model: str, base_url: str) -> None:
+        self._device_id = device_id
+        self._bearer_token = bearer_token
+        self._model = model
+        self._base_url = base_url.rstrip("/")
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def ready(self) -> bool:
+        return self._device_id != "" and self._bearer_token != ""
+
+    def embed(self, text: str) -> list[float]:
+        if not self.ready:
+            raise EmbeddingProviderNotReadyError()
+
+        payload = json.dumps({"model": self._model, "input": text}).encode()
+        request = urllib.request.Request(
+            url=f"{self._base_url}/v1/embeddings",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self._bearer_token}",
+                "X-Locram-Device-Id": self._device_id,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                body = response.read()
+        except urllib.error.HTTPError as error:
+            raise EmbeddingProviderError(
+                f"Locram hosted embeddings returned HTTP {error.code} for model '{self._model}'"
+            ) from error
+        except urllib.error.URLError as error:
+            raise EmbeddingProviderError(
+                f"Cannot reach Locram hosted embeddings at {self._base_url}"
+            ) from error
+
+        parsed = HostedEmbeddingResponse.model_validate_json(body)
+
+        if parsed.data == []:
+            raise EmbeddingProviderError(
+                "Locram hosted embeddings response missing embedding vector"
+            )
+
+        return parsed.data[0].embedding
+
+
 def build_embedding_provider(
     settings_path: Path | None = None,
     huggingface_api_key_path: Path | None = None,
+    access_repository: IAccessRepository | None = None,
 ) -> IEmbeddingProvider:
     settings, api_key = read_embedding_settings(
         settings_path or database.embedding_settings_path,
@@ -167,6 +225,25 @@ def build_embedding_provider(
 
     if settings.provider is EmbeddingProviderKind.HUGGINGFACE and api_key != "":
         return HuggingFaceEmbeddingProvider(api_key, settings.model)
+
+    if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+        repository = access_repository or AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        )
+        record = repository.load()
+
+        if record is not None and record.identity is not None:
+            relay_token = record.credential_data.get("relay_token", "").strip()
+
+            if relay_token != "":
+                return LocramHostedEmbeddingProvider(
+                    record.identity,
+                    relay_token,
+                    settings.model,
+                    settings.hosted_url,
+                )
 
     return NullEmbeddingProvider()
 

@@ -5,13 +5,16 @@ from interfaces.services.sharing import ISharingService
 from schemas.sharing import (
     OwnerShareManagementListResponse,
     RecipientBackupRequest,
+    RecipientBackupResponse,
     RecipientMcpVisibilityRequest,
     RecipientRenameRequest,
     RecipientShareViewListResponse,
+    RecipientShareViewResponse,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
     ShareGrantResponse,
     ShareGrantRevokeRequest,
+    ShareInviteResponse,
 )
 
 sharing_router = APIRouter(prefix="/api/base-share-grants")
@@ -82,46 +85,56 @@ def delete_grant(
     return sharing_service.delete_grant(grant_id)
 
 
-@sharing_router.get("/{grant_id}/invite")
+@sharing_router.get("/{grant_id}/invite", response_model=ShareInviteResponse)
 def get_invite(
     grant_id: str,
+    owner_display_name: str | None = Query(default=None),
+    message: str | None = Query(default=None),
     sharing_service: ISharingService = Depends(get_sharing_service),
-) -> None:
-    sharing_service.get_invite(grant_id)
+) -> ShareInviteResponse:
+    return ShareInviteResponse(
+        item=sharing_service.get_invite(grant_id, owner_display_name, message)
+    )
 
 
-@sharing_router.post("/{grant_id}/mcp-visibility")
+@sharing_router.post("/{grant_id}/mcp-visibility", response_model=RecipientShareViewResponse)
 def set_recipient_mcp_visibility(
     grant_id: str,
     payload: RecipientMcpVisibilityRequest,
     sharing_service: ISharingService = Depends(get_sharing_service),
-) -> None:
-    sharing_service.set_recipient_mcp_visibility(grant_id, payload.visible_in_mcp)
+) -> RecipientShareViewResponse:
+    return RecipientShareViewResponse(
+        item=sharing_service.set_recipient_mcp_visibility(grant_id, payload.visible_in_mcp)
+    )
 
 
-@sharing_router.put("/{grant_id}/rename")
+@sharing_router.put("/{grant_id}/rename", response_model=RecipientShareViewResponse)
 def rename_recipient(
     grant_id: str,
     payload: RecipientRenameRequest,
     sharing_service: ISharingService = Depends(get_sharing_service),
-) -> None:
-    sharing_service.rename_recipient(grant_id, payload.share_base_title)
+) -> RecipientShareViewResponse:
+    return RecipientShareViewResponse(
+        item=sharing_service.rename_recipient(grant_id, payload.share_base_title)
+    )
 
 
-@sharing_router.post("/{grant_id}/remove")
+@sharing_router.post("/{grant_id}/remove", response_model=ShareGrantDeletedResponse)
 def remove_recipient(
     grant_id: str,
     sharing_service: ISharingService = Depends(get_sharing_service),
-) -> None:
-    sharing_service.remove_recipient(grant_id)
+) -> ShareGrantDeletedResponse:
+    return sharing_service.remove_recipient(grant_id)
 
 
-@sharing_router.post("/{grant_id}/backup")
+@sharing_router.post("/{grant_id}/backup", response_model=RecipientBackupResponse)
 def backup_recipient(
     grant_id: str,
     payload: RecipientBackupRequest | None = None,
     sharing_service: ISharingService = Depends(get_sharing_service),
-) -> None:
+) -> RecipientBackupResponse:
     request = payload if payload is not None else RecipientBackupRequest()
 
-    sharing_service.backup_recipient(grant_id, request.trigger)
+    return RecipientBackupResponse(
+        item=sharing_service.backup_recipient(grant_id, request.trigger)
+    )

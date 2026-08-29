@@ -8,9 +8,11 @@ from schemas.bases import (
 
 
 class IBaseRegistryService(ABC):
-    """Bases: local knowledge-file registry.
+    """Bases: local knowledge-file registry plus shared and managed working bases.
 
-    Create, register, switch, rename, delete, access mode, and working-base selection.
+    Create, register, switch, rename, delete, access mode, and working-base
+    selection. `managed:` snapshot bases and accepted `shared:` shares are
+    selectable working bases.
     """
 
     @abstractmethod

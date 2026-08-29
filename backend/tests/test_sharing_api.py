@@ -33,7 +33,7 @@ def test_http_owner_grant_lifecycle(live_client: TestClient) -> None:
     assert deleted.json() == {"removed": True, "grant_id": grant_id}
 
 
-def test_http_invite_and_recipient_need_access(live_client: TestClient) -> None:
+def test_http_invite_requires_enrollment(live_client: TestClient) -> None:
     live_client.get("/api/bases")
     created = live_client.post(
         "/api/base-share-grants",
@@ -59,6 +59,6 @@ def test_http_invite_and_recipient_need_access(live_client: TestClient) -> None:
     assert invite.status_code == 409
     assert recipients.status_code == 200
     assert recipients.json()["items"] == []
-    assert visibility.status_code == 409
+    assert visibility.status_code == 404
     assert missing_owner.status_code == 422
     assert missing_grant.status_code == 404

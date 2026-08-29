@@ -16,16 +16,28 @@ from exceptions.bases import (
     WorkingBaseReadOnlyError,
 )
 from interfaces.repositories.bases import IBaseRegistryRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.bases import IBaseRegistryService
 from models.bases import BaseMetadata, RegistryEntry
 from schemas.bases import AgentAccessMode, RegistryEntryRecord, WorkingBaseRecord
+from schemas.sharing import ShareGrantPermission
 
-selected_working_entry_id: str | None = None
+selected_working_base_ref: str | None = None
+
+MANAGED_BASES = (
+    ("ggl", "GGL"),
+    ("documentation", "Documentation"),
+)
 
 
 class BaseRegistryService(IBaseRegistryService):
-    def __init__(self, base_registry_repository: IBaseRegistryRepository) -> None:
+    def __init__(
+        self,
+        base_registry_repository: IBaseRegistryRepository,
+        access_service: IAccessService | None = None,
+    ) -> None:
         self._base_registry_repository = base_registry_repository
+        self._access_service = access_service
 
     def list_bases(self) -> list[RegistryEntryRecord]:
         self._ensure_default()
@@ -108,8 +120,8 @@ class BaseRegistryService(IBaseRegistryService):
         if entry.is_active:
             raise ActiveBaseError(entry_id)
 
-        if selected_working_entry_id == entry_id:
-            self.select_working_base_id(None)
+        if selected_working_base_ref == f"local:{entry_id}":
+            self.select_working_base_ref(None)
 
         self._base_registry_repository.delete(entry_id)
 
@@ -127,8 +139,8 @@ class BaseRegistryService(IBaseRegistryService):
             if replacement is not None:
                 self.switch(replacement.entry_id)
 
-        if selected_working_entry_id == entry_id:
-            self.select_working_base_id(None)
+        if selected_working_base_ref == f"local:{entry_id}":
+            self.select_working_base_ref(None)
 
         path = Path(entry.path)
         self._base_registry_repository.delete(entry_id)
@@ -157,18 +169,18 @@ class BaseRegistryService(IBaseRegistryService):
         return self._to_record(self._base_registry_repository.save(entry))
 
     def list_working_bases(self) -> list[WorkingBaseRecord]:
-        return [
+        items = [
             self._to_working_base(entry)
             for entry in self.list_bases()
             if entry.agent_access_mode is not AgentAccessMode.HIDDEN
         ]
+        items.extend(self._managed_working_bases())
+        items.extend(self._shared_working_bases())
+        return items
 
     def get_current_working_base(self) -> WorkingBaseRecord | None:
-        if selected_working_entry_id is not None:
-            entry = self._base_registry_repository.get(selected_working_entry_id)
-
-            if entry is not None and entry.agent_access_mode is not AgentAccessMode.HIDDEN:
-                return self._to_working_base(self._to_record(entry))
+        if selected_working_base_ref is not None:
+            return self.get_working_base(selected_working_base_ref, write=False)
 
         active = self.get_active()
 
@@ -178,19 +190,15 @@ class BaseRegistryService(IBaseRegistryService):
         return self._to_working_base(active)
 
     def select_working_base(self, base_ref: str) -> WorkingBaseRecord:
-        entry = self._require_entry(self._entry_id_from_base_ref(base_ref))
-
-        if entry.agent_access_mode is AgentAccessMode.HIDDEN:
-            raise WorkingBaseNotFoundError(base_ref)
-
-        self.select_working_base_id(entry.entry_id)
-        return self._to_working_base(self._to_record(entry))
+        working = self.get_working_base(base_ref, write=False)
+        self.select_working_base_ref(working.base_ref)
+        return self.get_working_base(working.base_ref, write=False)
 
     def get_working_base(self, base_ref: str | None, write: bool) -> WorkingBaseRecord:
         self._ensure_default()
 
         if base_ref is not None:
-            return self._to_working_base(self._to_record(self._visible_entry(base_ref, write)))
+            return self._resolve_base_ref(base_ref, write)
 
         if write:
             writable = [
@@ -202,13 +210,8 @@ class BaseRegistryService(IBaseRegistryService):
             if len(writable) > 1:
                 raise WorkingBaseMutationTargetError()
 
-        if selected_working_entry_id is not None:
-            working = self._base_registry_repository.get(selected_working_entry_id)
-
-            if working is not None and working.agent_access_mode is not AgentAccessMode.HIDDEN:
-                return self._to_working_base(
-                    self._to_record(self._writable_if_needed(working, write))
-                )
+        if selected_working_base_ref is not None:
+            return self._resolve_base_ref(selected_working_base_ref, write)
 
         active = self._base_registry_repository.get_active()
 
@@ -216,6 +219,15 @@ class BaseRegistryService(IBaseRegistryService):
             return self._to_working_base(self._to_record(self._writable_if_needed(active, write)))
 
         raise WorkingBaseNotFoundError(base_ref or "local:")
+
+    def _resolve_base_ref(self, base_ref: str, write: bool) -> WorkingBaseRecord:
+        if base_ref.startswith("managed:"):
+            return self._managed_working_base(base_ref, write)
+
+        if base_ref.startswith("shared:"):
+            return self._shared_working_base(base_ref, write)
+
+        return self._to_working_base(self._to_record(self._visible_entry(base_ref, write)))
 
     def _visible_entry(self, base_ref: str, write: bool) -> RegistryEntry:
         entry = self._require_entry(self._entry_id_from_base_ref(base_ref))
@@ -233,11 +245,89 @@ class BaseRegistryService(IBaseRegistryService):
         return entry
 
     @staticmethod
-    def select_working_base_id(entry_id: str | None) -> None:
-        global selected_working_entry_id
+    def select_working_base_ref(base_ref: str | None) -> None:
+        global selected_working_base_ref
 
-        selected_working_entry_id = entry_id
+        selected_working_base_ref = base_ref
         database.knowledge_engines.clear()
+
+    def _managed_working_bases(self) -> list[WorkingBaseRecord]:
+        return [
+            self._managed_working_base(f"managed:{kind}", write=False)
+            for kind, _label in MANAGED_BASES
+        ]
+
+    def _managed_working_base(self, base_ref: str, write: bool) -> WorkingBaseRecord:
+        kind = base_ref.removeprefix("managed:")
+        label = None
+
+        for managed_kind, managed_label in MANAGED_BASES:
+            if managed_kind == kind:
+                label = managed_label
+                break
+
+        if label is None or kind == "":
+            raise WorkingBaseNotFoundError(base_ref)
+
+        if write:
+            raise WorkingBaseReadOnlyError(base_ref)
+
+        snapshot = database.managed_bases_path / f"{kind}.db"
+        path = str(snapshot) if snapshot.is_file() else ""
+        return WorkingBaseRecord(
+            base_ref=base_ref,
+            kind="managed",
+            label=label,
+            is_current_working_base=selected_working_base_ref == base_ref,
+            is_local_active_base=False,
+            is_selectable=True,
+            agent_access_mode=AgentAccessMode.READ,
+            entry_id=kind,
+            path=path,
+        )
+
+    def _shared_working_bases(self) -> list[WorkingBaseRecord]:
+        if self._access_service is None:
+            return []
+
+        now = datetime.now(UTC)
+        items: list[WorkingBaseRecord] = []
+
+        for share in self._access_service.list_accepted_shares():
+            if share.is_available(now):
+                items.append(self._shared_working_base(f"shared:{share.grant_id}", write=False))
+
+        return items
+
+    def _shared_working_base(self, base_ref: str, write: bool) -> WorkingBaseRecord:
+        if self._access_service is None:
+            raise WorkingBaseNotFoundError(base_ref)
+
+        grant_id = base_ref.removeprefix("shared:")
+        share = self._access_service.get_accepted_share(grant_id)
+
+        if share is None or grant_id == "" or not share.is_available(datetime.now(UTC)):
+            raise WorkingBaseNotFoundError(base_ref)
+
+        if write and share.permission is ShareGrantPermission.READ:
+            raise WorkingBaseReadOnlyError(base_ref)
+
+        agent_access_mode = AgentAccessMode.READ
+
+        if share.permission is not ShareGrantPermission.READ:
+            agent_access_mode = AgentAccessMode.WRITE
+
+        return WorkingBaseRecord(
+            base_ref=base_ref,
+            kind="shared",
+            label=share.share_base_title,
+            is_current_working_base=selected_working_base_ref == base_ref,
+            is_local_active_base=False,
+            is_selectable=True,
+            agent_access_mode=agent_access_mode,
+            entry_id=share.grant_id,
+            path="",
+        )
 
     def _ensure_default(self) -> None:
         if self._base_registry_repository.list_entries():
@@ -329,10 +419,11 @@ class BaseRegistryService(IBaseRegistryService):
 
     @staticmethod
     def _to_working_base(entry: RegistryEntryRecord) -> WorkingBaseRecord:
-        is_selected = selected_working_entry_id == entry.entry_id
-        is_fallback = selected_working_entry_id is None and entry.is_active
+        is_selected = selected_working_base_ref == f"local:{entry.entry_id}"
+        is_fallback = selected_working_base_ref is None and entry.is_active
         return WorkingBaseRecord(
             base_ref=f"local:{entry.entry_id}",
+            kind="local",
             label=entry.display_name,
             is_current_working_base=is_selected or is_fallback,
             is_local_active_base=entry.is_active,

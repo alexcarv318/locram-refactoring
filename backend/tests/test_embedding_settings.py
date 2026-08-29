@@ -3,7 +3,12 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from schemas.embeddings import EmbeddingProviderKind, EmbeddingSettingsPatch
-from services.embeddings import EmbeddingService
+from services.access import AccessService
+from services.embeddings import (
+    EmbeddingService,
+    LocramHostedEmbeddingProvider,
+    build_embedding_provider,
+)
 
 
 def test_default_settings_are_hosted(embedding_service: EmbeddingService) -> None:
@@ -49,3 +54,12 @@ def test_http_embedding_settings_round_trip(client: TestClient) -> None:
     assert "huggingface_api_key" not in patched.json()["item"]
     assert bootstrapped.status_code == 200
     assert bootstrapped.json()["item"]["status_lines"][0] == "provider=ollama"
+
+
+def test_hosted_provider_uses_enrolled_access(enrolled_access: AccessService) -> None:
+    assert enrolled_access.summary().status.credential_material_present is True
+    provider = build_embedding_provider()
+
+    assert type(provider) is LocramHostedEmbeddingProvider
+    assert provider.ready is True
+    assert provider.model == "bge-m3"

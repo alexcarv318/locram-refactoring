@@ -1,7 +1,11 @@
+import importlib
+import importlib.util
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.access import access_router
 from api.attachments import attachments_router
 from api.backups import backups_router
 from api.bases import bases_router
@@ -28,10 +32,18 @@ app.include_router(backups_router)
 app.include_router(exports_router)
 app.include_router(merges_router)
 app.include_router(sharing_router)
+app.include_router(access_router)
 app.include_router(presets_router)
 app.include_router(notes_router)
 app.include_router(embeddings_router)
 app.include_router(desktop_embeddings_router)
+
+try:
+    if importlib.util.find_spec("mcp.server.mcpserver") is not None:
+        locram_mcp_main = importlib.import_module("locram_mcp.main")
+        app.mount("/", locram_mcp_main.mcp.streamable_http_app())
+except ModuleNotFoundError:
+    pass
 
 
 @app.exception_handler(AppError)

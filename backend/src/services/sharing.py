@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from typing import Never
 
 from ulid import ULID
 
@@ -11,17 +10,21 @@ from exceptions.sharing import (
 )
 from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.repositories.sharing import ISharingRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.sharing import ISharingService
 from models.bases import RegistryEntry
 from models.sharing import BaseShareGrant
+from schemas.access import AcceptedShareRecord, InviteMintRequest
 from schemas.sharing import (
     OwnerShareManagementItem,
+    RecipientBackupResult,
     RecipientShareViewItem,
     ShareActivationState,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
     ShareGrantRecord,
     ShareGrantState,
+    ShareInvite,
 )
 
 
@@ -30,9 +33,11 @@ class SharingService(ISharingService):
         self,
         sharing_repository: ISharingRepository,
         base_registry_repository: IBaseRegistryRepository,
+        access_service: IAccessService,
     ) -> None:
         self._sharing_repository = sharing_repository
         self._base_registry_repository = base_registry_repository
+        self._access_service = access_service
 
     def list_owner_view(
         self,
@@ -66,12 +71,26 @@ class SharingService(ISharingService):
         include_inactive: bool,
         evaluation_at: str | None,
     ) -> list[RecipientShareViewItem]:
-        if (recipient_actor_ref or "").strip() == "" and (
-            recipient_account_id or ""
-        ).strip() == "":
+        actor_ref = (recipient_actor_ref or "").strip()
+        account_id = (recipient_account_id or "").strip()
+
+        if actor_ref == "" and account_id == "":
             raise SharingError("recipient_actor_ref or recipient_account_id is required")
 
-        return []
+        items: list[RecipientShareViewItem] = []
+
+        for share in self._access_service.list_accepted_shares():
+            if not self._matches_recipient(share, actor_ref, account_id):
+                continue
+
+            item = self._recipient_item(share, evaluation_at)
+
+            if not include_inactive and item.grant_state is not ShareGrantState.ACTIVE:
+                continue
+
+            items.append(item)
+
+        return items
 
     def create_grant(self, payload: ShareGrantCreateRequest) -> ShareGrantRecord:
         owner_actor_ref = payload.owner_actor_ref.strip()
@@ -137,25 +156,135 @@ class SharingService(ISharingService):
 
         return ShareGrantDeletedResponse(removed=True, grant_id=grant_id)
 
-    def get_invite(self, grant_id: str) -> Never:
+    def get_invite(
+        self,
+        grant_id: str,
+        owner_display_name: str | None,
+        message: str | None,
+    ) -> ShareInvite:
         grant = self._sharing_repository.get(grant_id)
 
         if grant is None:
             raise ShareGrantNotFoundError(grant_id)
 
-        raise SharingNotReadyError("Invite minting needs Access")
+        if grant.revoked_at is not None:
+            raise SharingError("Cannot mint an invite for a revoked grant")
 
-    def set_recipient_mcp_visibility(self, grant_id: str, visible_in_mcp: bool) -> Never:
-        raise SharingNotReadyError("Recipient shares need Access")
+        entry = self._registry_entry_for_grant(grant)
+        share_base_title = entry.display_name if entry is not None else grant.base_id
+        recipient_account_id = None
 
-    def rename_recipient(self, grant_id: str, share_base_title: str) -> Never:
-        raise SharingNotReadyError("Recipient shares need Access")
+        if grant.recipient_actor_ref.startswith("account:"):
+            recipient_account_id = grant.recipient_actor_ref.removeprefix("account:") or None
 
-    def remove_recipient(self, grant_id: str) -> Never:
-        raise SharingNotReadyError("Recipient shares need Access")
+        invite = self._access_service.mint_invite(
+            InviteMintRequest(
+                grant_id=grant.grant_id,
+                recipient_actor_ref=grant.recipient_actor_ref,
+                recipient_account_id=recipient_account_id,
+                share_base_id=grant.base_id,
+                share_entry_id=grant.entry_id,
+                share_base_title=share_base_title,
+                permission=grant.permission,
+                grant_created_at=grant.created_at,
+                owner_display_name=owner_display_name,
+                expires_at=grant.expires_at,
+                message=message,
+            )
+        )
+        grant.last_invited_at = self._now()
+        self._sharing_repository.save(grant)
+        return invite
 
-    def backup_recipient(self, grant_id: str, trigger: str) -> Never:
-        raise SharingNotReadyError("Recipient shares need Access")
+    def set_recipient_mcp_visibility(
+        self,
+        grant_id: str,
+        visible_in_mcp: bool,
+    ) -> RecipientShareViewItem:
+        share = self._accepted_share(grant_id)
+        updated = share.model_copy(update={"visible_in_mcp": visible_in_mcp})
+        return self._recipient_item(self._access_service.update_accepted_share(updated), None)
+
+    def rename_recipient(self, grant_id: str, share_base_title: str) -> RecipientShareViewItem:
+        title = share_base_title.strip()
+
+        if title == "":
+            raise SharingError("share_base_title is required")
+
+        share = self._accepted_share(grant_id)
+        updated = share.model_copy(update={"share_base_title": title})
+        return self._recipient_item(self._access_service.update_accepted_share(updated), None)
+
+    def remove_recipient(self, grant_id: str) -> ShareGrantDeletedResponse:
+        self._accepted_share(grant_id)
+        self._access_service.remove_accepted_share(grant_id)
+        return ShareGrantDeletedResponse(removed=True, grant_id=grant_id)
+
+    def backup_recipient(self, grant_id: str, trigger: str) -> RecipientBackupResult:
+        self._accepted_share(grant_id)
+        raise SharingNotReadyError(
+            "Recipient backup needs a local shared-base file"
+        )
+
+    def _accepted_share(self, grant_id: str) -> AcceptedShareRecord:
+        share = self._access_service.get_accepted_share(grant_id)
+
+        if share is None:
+            raise ShareGrantNotFoundError(grant_id)
+
+        return share
+
+    def _recipient_item(
+        self,
+        share: AcceptedShareRecord,
+        evaluation_at: str | None,
+    ) -> RecipientShareViewItem:
+        grant_state = ShareGrantState.ACTIVE
+
+        if share.session_state == "revoked":
+            grant_state = ShareGrantState.REVOKED
+        elif share.expires_at is not None:
+            expires_at = self._parse_timestamp(share.expires_at)
+            compared_at = self._parse_timestamp(evaluation_at or self._now())
+
+            if expires_at <= compared_at:
+                grant_state = ShareGrantState.EXPIRED
+
+        return RecipientShareViewItem(
+            grant_id=share.grant_id,
+            owner_actor_ref=share.owner_actor_ref,
+            recipient_actor_ref=share.recipient_actor_ref,
+            base_id=share.share_base_id,
+            entry_id=share.share_entry_id,
+            permission=share.permission,
+            created_at=share.grant_created_at or share.accepted_at,
+            last_invited_at=None,
+            activated_at=share.accepted_at,
+            expires_at=share.expires_at,
+            revoked_at=None,
+            revocation_reason=None,
+            recipient_account_id=share.recipient_account_id,
+            share_base_title=share.share_base_title,
+            owner_display_name=share.owner_display_name,
+            grant_state=grant_state,
+            activation_state=ShareActivationState.ACTIVE,
+            session_state=share.session_state,
+            visible_in_mcp=share.visible_in_mcp,
+        )
+
+    @staticmethod
+    def _matches_recipient(
+        share: AcceptedShareRecord,
+        actor_ref: str,
+        account_id: str,
+    ) -> bool:
+        if actor_ref != "" and share.recipient_actor_ref == actor_ref:
+            return True
+
+        if account_id != "" and share.recipient_account_id == account_id:
+            return True
+
+        return account_id != "" and share.recipient_actor_ref == f"account:{account_id}"
 
     def _target_registry_entry(
         self,

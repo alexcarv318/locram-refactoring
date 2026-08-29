@@ -44,6 +44,10 @@ attachments_path = Path.home() / ".locram" / "attachments"
 filter_presets_path = Path.home() / ".locram" / "preferences" / "filter-presets.json"
 embedding_settings_path = Path.home() / ".locram" / "preferences" / "embedding-settings.json"
 huggingface_api_key_path = Path.home() / ".locram" / "preferences" / "huggingface-api-key"
+access_path = Path.home() / ".locram" / "preferences" / "access.json"
+access_credentials_path = Path.home() / ".locram" / "preferences" / "access-credentials.json"
+accepted_shares_path = Path.home() / ".locram" / "preferences" / "accepted-shares.json"
+managed_bases_path = Path.home() / ".locram" / "managed-bases"
 
 
 knowledge_engines = KnowledgeEngines()

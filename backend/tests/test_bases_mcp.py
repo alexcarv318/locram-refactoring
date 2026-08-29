@@ -19,7 +19,7 @@ def test_mcp_base_and_working_base_tools(
     renamed = mcp_bases.base_rename_base(created.entry_id, "Vault Two")
 
     assert created.display_name == "Vault"
-    assert listed[0].entry_id == created.entry_id
+    assert [item.entry_id for item in listed if item.kind == "local"] == [created.entry_id]
     assert current is not None
     assert current.base_ref == f"local:{created.entry_id}"
     assert selected.is_current_working_base is True
@@ -50,4 +50,4 @@ def test_mcp_base_errors_and_hidden(
 
     listed = mcp_bases.working_base_list_bases()
 
-    assert [item.entry_id for item in listed] == [active.entry_id]
+    assert [item.entry_id for item in listed if item.kind == "local"] == [active.entry_id]

@@ -2,6 +2,7 @@ import importlib
 from collections.abc import Callable
 from typing import cast
 
+from . import access as access_tools
 from . import attachments as attachment_tools
 from . import backups as backup_tools
 from . import bases as bases_tools
@@ -32,6 +33,7 @@ backup_tools.register(mcp)
 export_tools.register(mcp)
 merge_tools.register(mcp)
 sharing_tools.register(mcp)
+access_tools.register(mcp)
 
 
 def main() -> None:

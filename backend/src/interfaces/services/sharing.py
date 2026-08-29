@@ -1,20 +1,21 @@
 from abc import ABC, abstractmethod
-from typing import Never
 
 from schemas.sharing import (
     OwnerShareManagementItem,
+    RecipientBackupResult,
     RecipientShareViewItem,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
     ShareGrantRecord,
+    ShareInvite,
 )
 
 
 class ISharingService(ABC):
-    """Sharing: local owner grants for a registered base.
+    """Sharing: owner grants, signed invites, and accepted recipient shares.
 
-    Create, list, revoke, and delete grants on host-state. Invite minting,
-    recipient sessions, and shared working bases stay not-ready until Access.
+    Owner grants live on host-state. Invite minting and recipient sessions use
+    Access credentials. Accepted shares appear as shared working bases.
     """
 
     @abstractmethod
@@ -45,16 +46,25 @@ class ISharingService(ABC):
     def delete_grant(self, grant_id: str) -> ShareGrantDeletedResponse: ...
 
     @abstractmethod
-    def get_invite(self, grant_id: str) -> Never: ...
+    def get_invite(
+        self,
+        grant_id: str,
+        owner_display_name: str | None,
+        message: str | None,
+    ) -> ShareInvite: ...
 
     @abstractmethod
-    def set_recipient_mcp_visibility(self, grant_id: str, visible_in_mcp: bool) -> Never: ...
+    def set_recipient_mcp_visibility(
+        self,
+        grant_id: str,
+        visible_in_mcp: bool,
+    ) -> RecipientShareViewItem: ...
 
     @abstractmethod
-    def rename_recipient(self, grant_id: str, share_base_title: str) -> Never: ...
+    def rename_recipient(self, grant_id: str, share_base_title: str) -> RecipientShareViewItem: ...
 
     @abstractmethod
-    def remove_recipient(self, grant_id: str) -> Never: ...
+    def remove_recipient(self, grant_id: str) -> ShareGrantDeletedResponse: ...
 
     @abstractmethod
-    def backup_recipient(self, grant_id: str, trigger: str) -> Never: ...
+    def backup_recipient(self, grant_id: str, trigger: str) -> RecipientBackupResult: ...

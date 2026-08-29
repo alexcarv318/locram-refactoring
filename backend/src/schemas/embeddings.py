@@ -121,6 +121,14 @@ class EmbeddingBootstrapResult(BaseModel):
     status_lines: list[str]
 
 
+class HostedEmbeddingItem(BaseModel):
+    embedding: list[float]
+
+
+class HostedEmbeddingResponse(BaseModel):
+    data: list[HostedEmbeddingItem]
+
+
 class DesktopEmbedRunRequest(BaseModel):
     base_id: str | None = None
     base_ref: str | None = None
