@@ -118,3 +118,20 @@ def test_http_replace_active(client: TestClient, tmp_path: Path) -> None:
     assert current.json()["item"]["entry_id"] not in {
         item["entry_id"] for item in listed.json()["items"]
     }
+
+
+def test_http_managed_bases_list_and_refresh(client: TestClient) -> None:
+    listed = client.get("/api/bases")
+    kinds = {item["kind"] for item in listed.json()["built_in_bases"]}
+    refreshed = client.post("/api/bases/managed/ggl/refresh")
+    unknown = client.post("/api/bases/managed/unknown/refresh")
+    locale_rejected = client.post("/api/bases/managed/ggl/refresh", json={"locale": "en"})
+
+    assert listed.status_code == 200
+    assert kinds == {"ggl", "documentation"}
+    assert listed.json()["built_in_bases"][0]["refresh_configured"] is True
+    assert refreshed.status_code == 200
+    assert refreshed.json()["item"]["kind"] == "ggl"
+    assert refreshed.json()["item"]["refresh_configured"] is True
+    assert unknown.status_code == 404
+    assert locale_rejected.status_code == 400

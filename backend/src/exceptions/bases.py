@@ -62,3 +62,28 @@ class WorkingBaseMutationTargetError(BaseError):
 
     def __init__(self) -> None:
         super().__init__("Multiple writable local bases exist; pass an explicit base_ref")
+
+
+class ManagedBaseKindError(BaseError):
+    status_code = 404
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"Unknown managed base kind: {kind}")
+
+        self.kind = kind
+
+
+class ManagedBaseLocaleError(BaseError):
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"Managed base {kind} does not accept a locale")
+
+        self.kind = kind
+
+
+class ManagedBaseSeedError(BaseError):
+    status_code = 500
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"Packaged seed for managed base {kind} is missing")
+
+        self.kind = kind

@@ -65,9 +65,47 @@ class RegistryEntryResponse(BaseModel):
     item: RegistryEntryRecord
 
 
+class ManagedBaseKind(StrEnum):
+    GGL = "ggl"
+    DOCUMENTATION = "documentation"
+
+
+class ManagedBaseRefreshRequest(BaseModel):
+    locale: str | None = None
+
+
+class ManagedBaseSummaryRecord(BaseModel):
+    kind: ManagedBaseKind
+    label: str
+    base_key: str
+    base_ref: str
+    content_kind: str
+    read_only: bool
+    visibility: str
+    mounted_version: str | None
+    updated_at: str
+    path: str
+    base_id: str | None
+    source_url: str | None
+    integrity_ref: str | None
+    bootstrap_source: str | None
+    locale: str | None
+    available_locales: list[str]
+    documentation_assets: None = None
+    remote_manifest_url: str | None
+    remote_artifact_url: str | None
+    refresh_configured: bool
+    stats: None = None
+
+
+class ManagedBaseSummaryResponse(BaseModel):
+    item: ManagedBaseSummaryRecord
+
+
 class RegistryEntryListResponse(BaseModel):
     items: list[RegistryEntryRecord]
     active_base: RegistryEntryRecord | None
+    built_in_bases: list[ManagedBaseSummaryRecord] = []
 
 
 class WorkingBaseRecord(BaseModel):

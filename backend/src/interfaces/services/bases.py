@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 from schemas.bases import (
     AgentAccessMode,
+    ManagedBaseSummaryRecord,
     RegistryEntryRecord,
     WorkingBaseRecord,
 )
@@ -11,8 +12,9 @@ class IBaseRegistryService(ABC):
     """Bases: local knowledge-file registry plus shared and managed working bases.
 
     Create, register, switch, rename, delete, access mode, and working-base
-    selection. `managed:` snapshot bases and accepted `shared:` shares are
-    selectable working bases.
+    selection. `managed:` snapshot bases copy packaged seeds into
+    `managed-bases/` on refresh. Accepted `shared:` shares are selectable
+    working bases.
     """
 
     @abstractmethod
@@ -56,6 +58,16 @@ class IBaseRegistryService(ABC):
         entry_id: str,
         agent_access_mode: AgentAccessMode,
     ) -> RegistryEntryRecord: ...
+
+    @abstractmethod
+    def list_managed_bases(self) -> list[ManagedBaseSummaryRecord]: ...
+
+    @abstractmethod
+    def refresh_managed_base(
+        self,
+        kind: str,
+        locale: str | None = None,
+    ) -> ManagedBaseSummaryRecord: ...
 
     @abstractmethod
     def list_working_bases(self) -> list[WorkingBaseRecord]: ...

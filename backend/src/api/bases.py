@@ -11,6 +11,8 @@ from schemas.bases import (
     BaseRenameRequest,
     BaseReplaceActiveRequest,
     BaseUnregisteredResponse,
+    ManagedBaseRefreshRequest,
+    ManagedBaseSummaryResponse,
     RegistryEntryListResponse,
     RegistryEntryResponse,
 )
@@ -23,7 +25,11 @@ def list_bases(
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
 ) -> RegistryEntryListResponse:
     items = base_registry_service.list_bases()
-    return RegistryEntryListResponse(items=items, active_base=base_registry_service.get_active())
+    return RegistryEntryListResponse(
+        items=items,
+        active_base=base_registry_service.get_active(),
+        built_in_bases=base_registry_service.list_managed_bases(),
+    )
 
 
 @bases_router.post("/register", response_model=RegistryEntryResponse, status_code=201)
@@ -47,6 +53,22 @@ def create_base(
 ) -> RegistryEntryResponse:
     return RegistryEntryResponse(
         item=base_registry_service.create(payload.path, payload.display_name, payload.activate)
+    )
+
+
+@bases_router.post("/managed/{kind}/refresh", response_model=ManagedBaseSummaryResponse)
+def refresh_managed_base(
+    kind: str,
+    payload: ManagedBaseRefreshRequest | None = None,
+    base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
+) -> ManagedBaseSummaryResponse:
+    locale = None
+
+    if payload is not None:
+        locale = payload.locale
+
+    return ManagedBaseSummaryResponse(
+        item=base_registry_service.refresh_managed_base(kind, locale)
     )
 
 

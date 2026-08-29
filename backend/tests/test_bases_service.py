@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy import func, select
 
 from database import open_knowledge_session
 from exceptions.bases import (
@@ -8,9 +9,12 @@ from exceptions.bases import (
     BaseFileExistsError,
     BaseFileNotFoundError,
     BaseNotFoundError,
+    ManagedBaseKindError,
+    ManagedBaseLocaleError,
     WorkingBaseNotFoundError,
 )
 from exceptions.pages import PageNotFoundError
+from models.pages import Page
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
 from schemas.bases import AgentAccessMode
@@ -131,6 +135,7 @@ def test_working_base_select_hides_hidden(
     assert managed.kind == "managed"
     assert managed.base_ref == "managed:documentation"
     assert managed.agent_access_mode is AgentAccessMode.READ
+    assert Path(managed.path).is_file()
 
     with pytest.raises(WorkingBaseNotFoundError):
         base_registry_service.select_working_base("local:")
@@ -234,3 +239,45 @@ def test_pages_stay_in_the_base_that_created_them(
         second_pages.get_page(page.id)
 
     assert first_pages.get_page(page.id).title == "Only here"
+
+
+def test_refresh_managed_base_copies_seed(
+    base_registry_service: BaseRegistryService,
+    tmp_path: Path,
+) -> None:
+    first = base_registry_service.refresh_managed_base("ggl")
+    snapshot = Path(first.path)
+    snapshot.write_bytes(b"stale")
+    second = base_registry_service.refresh_managed_base("ggl")
+
+    assert first.kind.value == "ggl"
+    assert first.refresh_configured is True
+    assert first.bootstrap_source == "packaged_seed"
+    assert snapshot.is_file()
+    assert snapshot.stat().st_size > 4
+    assert second.path == first.path
+
+
+def test_refresh_managed_base_rejects_unknown_kind_and_ggl_locale(
+    base_registry_service: BaseRegistryService,
+) -> None:
+    with pytest.raises(ManagedBaseKindError):
+        base_registry_service.refresh_managed_base("unknown")
+
+    with pytest.raises(ManagedBaseLocaleError):
+        base_registry_service.refresh_managed_base("ggl", locale="en")
+
+    documented = base_registry_service.refresh_managed_base("documentation", locale="en")
+
+    assert documented.kind.value == "documentation"
+
+
+def test_refreshed_managed_base_can_open_pages(
+    base_registry_service: BaseRegistryService,
+) -> None:
+    summary = base_registry_service.refresh_managed_base("ggl")
+    session = open_knowledge_session(Path(summary.path))
+    count = session.scalar(select(func.count()).select_from(Page))
+
+    assert count is not None
+    assert count > 0

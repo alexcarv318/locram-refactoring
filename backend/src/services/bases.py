@@ -1,6 +1,9 @@
+import shutil
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from alembic.script import ScriptDirectory
 from sqlalchemy import select
 from ulid import ULID
 
@@ -11,6 +14,9 @@ from exceptions.bases import (
     BaseFileExistsError,
     BaseFileNotFoundError,
     BaseNotFoundError,
+    ManagedBaseKindError,
+    ManagedBaseLocaleError,
+    ManagedBaseSeedError,
     WorkingBaseMutationTargetError,
     WorkingBaseNotFoundError,
     WorkingBaseReadOnlyError,
@@ -19,15 +25,21 @@ from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.services.access import IAccessService
 from interfaces.services.bases import IBaseRegistryService
 from models.bases import BaseMetadata, RegistryEntry
-from schemas.bases import AgentAccessMode, RegistryEntryRecord, WorkingBaseRecord
+from schemas.bases import (
+    AgentAccessMode,
+    ManagedBaseKind,
+    ManagedBaseSummaryRecord,
+    RegistryEntryRecord,
+    WorkingBaseRecord,
+)
 from schemas.sharing import ShareGrantPermission
 
 selected_working_base_ref: str | None = None
 
-MANAGED_BASES = (
-    ("ggl", "GGL"),
-    ("documentation", "Documentation"),
-)
+MANAGED_BASE_LABELS = {
+    ManagedBaseKind.GGL: "GGL",
+    ManagedBaseKind.DOCUMENTATION: "Documentation",
+}
 
 
 class BaseRegistryService(IBaseRegistryService):
@@ -177,6 +189,23 @@ class BaseRegistryService(IBaseRegistryService):
         entry.updated_at = self._now()
         return self._to_record(self._base_registry_repository.save(entry))
 
+    def list_managed_bases(self) -> list[ManagedBaseSummaryRecord]:
+        return [self._managed_base_summary(kind) for kind in ManagedBaseKind]
+
+    def refresh_managed_base(
+        self,
+        kind: str,
+        locale: str | None = None,
+    ) -> ManagedBaseSummaryRecord:
+        managed_kind = self._managed_kind(kind)
+
+        if locale is not None and managed_kind is ManagedBaseKind.GGL:
+            raise ManagedBaseLocaleError(kind)
+
+        self._copy_managed_seed(managed_kind, overwrite=True)
+        database.knowledge_engines.clear()
+        return self._managed_base_summary(managed_kind)
+
     def list_working_bases(self) -> list[WorkingBaseRecord]:
         items = [
             self._to_working_base(entry)
@@ -262,38 +291,134 @@ class BaseRegistryService(IBaseRegistryService):
 
     def _managed_working_bases(self) -> list[WorkingBaseRecord]:
         return [
-            self._managed_working_base(f"managed:{kind}", write=False)
-            for kind, _label in MANAGED_BASES
+            self._managed_working_base(f"managed:{kind.value}", write=False)
+            for kind in ManagedBaseKind
         ]
 
     def _managed_working_base(self, base_ref: str, write: bool) -> WorkingBaseRecord:
         kind = base_ref.removeprefix("managed:")
-        label = None
+        managed_kind = None
 
-        for managed_kind, managed_label in MANAGED_BASES:
-            if managed_kind == kind:
-                label = managed_label
+        for candidate in ManagedBaseKind:
+            if candidate.value == kind:
+                managed_kind = candidate
                 break
 
-        if label is None or kind == "":
+        if managed_kind is None:
             raise WorkingBaseNotFoundError(base_ref)
 
         if write:
             raise WorkingBaseReadOnlyError(base_ref)
 
-        snapshot = database.managed_bases_path / f"{kind}.db"
-        path = str(snapshot) if snapshot.is_file() else ""
+        snapshot = self._ensure_managed_snapshot(managed_kind)
         return WorkingBaseRecord(
             base_ref=base_ref,
             kind="managed",
-            label=label,
+            label=MANAGED_BASE_LABELS[managed_kind],
             is_current_working_base=selected_working_base_ref == base_ref,
             is_local_active_base=False,
             is_selectable=True,
             agent_access_mode=AgentAccessMode.READ,
-            entry_id=kind,
-            path=path,
+            entry_id=managed_kind.value,
+            path=str(snapshot),
         )
+
+    def _managed_base_summary(self, kind: ManagedBaseKind) -> ManagedBaseSummaryRecord:
+        snapshot = self._ensure_managed_snapshot(kind)
+        updated_at = datetime.fromtimestamp(snapshot.stat().st_mtime, UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        return ManagedBaseSummaryRecord(
+            kind=kind,
+            label=MANAGED_BASE_LABELS[kind],
+            base_key=kind.value,
+            base_ref=f"managed:{kind.value}",
+            content_kind="managed_sqlite",
+            read_only=True,
+            visibility="network_read",
+            mounted_version=None,
+            updated_at=updated_at,
+            path=str(snapshot.resolve()),
+            base_id=self._read_managed_base_id(snapshot),
+            source_url=None,
+            integrity_ref=None,
+            bootstrap_source="packaged_seed",
+            locale=None,
+            available_locales=[],
+            remote_manifest_url=None,
+            remote_artifact_url=None,
+            refresh_configured=True,
+        )
+
+    def _ensure_managed_snapshot(self, kind: ManagedBaseKind) -> Path:
+        return self._copy_managed_seed(kind, overwrite=False)
+
+    def _copy_managed_seed(self, kind: ManagedBaseKind, overwrite: bool) -> Path:
+        destination = database.managed_bases_path / f"{kind.value}.db"
+        source = database.managed_base_seeds_path / f"{kind.value}.db"
+
+        if not source.is_file():
+            raise ManagedBaseSeedError(kind.value)
+
+        if destination.is_file() and not overwrite:
+            return destination
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        self._stamp_managed_snapshot(destination)
+        return destination
+
+    @staticmethod
+    def _stamp_managed_snapshot(path: Path) -> None:
+        head = ScriptDirectory.from_config(database.alembic_config()).get_current_head()
+
+        if head is None:
+            return
+
+        connection = sqlite3.connect(path)
+
+        try:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS alembic_version ("
+                "version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+            )
+            connection.execute("DELETE FROM alembic_version")
+            connection.execute(
+                "INSERT INTO alembic_version (version_num) VALUES (?)",
+                (head,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _managed_kind(kind: str) -> ManagedBaseKind:
+        for managed_kind in ManagedBaseKind:
+            if managed_kind.value == kind:
+                return managed_kind
+
+        raise ManagedBaseKindError(kind)
+
+    @staticmethod
+    def _read_managed_base_id(path: Path) -> str | None:
+        connection = sqlite3.connect(path)
+
+        try:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'base_metadata'"
+            ).fetchone()
+
+            if exists is None:
+                return None
+
+            row = connection.execute("SELECT base_id FROM base_metadata LIMIT 1").fetchone()
+
+            if row is None:
+                return None
+
+            return str(row[0])
+        finally:
+            connection.close()
 
     def _shared_working_bases(self) -> list[WorkingBaseRecord]:
         if self._access_service is None:
