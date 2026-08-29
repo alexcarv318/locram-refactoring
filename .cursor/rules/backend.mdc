@@ -90,9 +90,9 @@ src/
   services/<feature>.py
   api/main.py
   api/<feature>.py
-  mcp/main.py
-  mcp/protocol.py
-  mcp/<feature>.py
+  mcp_server/main.py
+  mcp_server/protocol.py
+  mcp_server/<feature>.py
   database.py
   dependencies.py
 ```
@@ -109,15 +109,14 @@ src/
 
 - `/api` and `/mcp`. Both have `main.py`.
 - `api/main.py` defines the uvicorn application.
-- `mcp/main.py` defines the MCP server.
+- `mcp_server/main.py` defines the MCP server.
 - Feature modules in `/api` are routes.
-- Feature modules in `/mcp` are tools.
-- `mcp/protocol.py` holds `MCPServerApp`. Do not put that protocol in a feature module.
-- Do not add `mcp/server.py`. That name shadows the official `mcp.server` package when tests import `mcp.*`.
-- Do not use `@mcp.tool`. Our folder is `mcp`, so importing the server into feature modules breaks the official SDK. `main.py` imports `pages as pages_tools` and `links as link_tools`, then calls `register(mcp)`.
+- Feature modules in `/mcp_server` are tools.
+- `mcp_server/protocol.py` holds `MCPServerApp`. Do not put that protocol in a feature module.
+- Do not use `@mcp.tool`. `main.py` imports `pages as pages_tools` and `links as link_tools`, then calls `register(mcp_server)`.
 - MCP is a foundation of the project. Do not skip it.
 - Do not add a CLI unless asked.
-- The official Python package `mcp` is the SDK. Our MCP app is installed as `locram_mcp`. The folder stays `src/mcp`.
+- The official Python package `mcp` is the SDK. Our tools package is `mcp_server`.
 - Routes type the service as `page_service: IPageService = Depends(get_page_service)`.
 - The exception handler lives in `api/main.py`, not as a helper in a route module.
 - Never construct a repository or service inside a route or a tool.

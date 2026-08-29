@@ -1,6 +1,6 @@
 import pytest
 
-import mcp.embeddings as mcp_embeddings
+import mcp_server.embeddings as mcp_embeddings
 from exceptions.pages import PageNotFoundError
 from schemas.pages import PageCreate
 from services.embeddings import EmbeddingService

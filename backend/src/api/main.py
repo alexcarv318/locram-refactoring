@@ -1,5 +1,5 @@
-import importlib
-import importlib.util
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -19,6 +19,7 @@ from api.pages import pages_router
 from api.sharing import sharing_router
 from api.smart_folders import notes_router, presets_router
 from exceptions.app import AppError
+from mcp_server.main import mcp_server
 
 app = FastAPI(title="locram")
 
@@ -38,14 +39,6 @@ app.include_router(notes_router)
 app.include_router(embeddings_router)
 app.include_router(desktop_embeddings_router)
 
-try:
-    if importlib.util.find_spec("mcp.server.mcpserver") is not None:
-        locram_mcp_main = importlib.import_module("locram_mcp.main")
-        app.mount("/", locram_mcp_main.mcp.streamable_http_app())
-except ModuleNotFoundError:
-    pass
-
-
 @app.exception_handler(AppError)
 async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
     return JSONResponse(
@@ -53,9 +46,21 @@ async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
         content={"detail": str(error)},
     )
 
+def mount_mcp_http(application: FastAPI) -> None:
+    mcp_http_app = mcp_server.streamable_http_app()
+    inner_lifespan = mcp_http_app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        async with inner_lifespan(mcp_http_app):
+            yield
+
+    application.router.lifespan_context = lifespan
+    application.mount("/", mcp_http_app)
 
 def main() -> None:
-    uvicorn.run("api.main:app", host="127.0.0.1", port=8757, reload=True)
+    mount_mcp_http(app)
+    uvicorn.run(app, host="127.0.0.1", port=8757)
 
 
 if __name__ == "__main__":

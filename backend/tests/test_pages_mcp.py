@@ -1,6 +1,6 @@
 import pytest
 
-import mcp.pages as mcp_pages
+import mcp_server.pages as mcp_pages
 from exceptions.pages import (
     HubParentError,
     PageNotDeletedError,

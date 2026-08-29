@@ -103,4 +103,6 @@ def set_base_mcp_visibility(
     payload: AgentAccessModeUpdate,
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
 ) -> RegistryEntryResponse:
-    return RegistryEntryResponse(item=base_registry_service.set_agent_access_mode(entry_id, payload.agent_access_mode))
+    return RegistryEntryResponse(
+        item=base_registry_service.set_agent_access_mode(entry_id, payload.agent_access_mode)
+    )

@@ -8,17 +8,17 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 import database
-import mcp.access as mcp_access
-import mcp.attachments as mcp_attachments
-import mcp.backups as mcp_backups
-import mcp.bases as mcp_bases
-import mcp.embeddings as mcp_embeddings
-import mcp.exports as mcp_exports
-import mcp.links as mcp_links
-import mcp.merges as mcp_merges
-import mcp.pages as mcp_pages
-import mcp.sharing as mcp_sharing
-import mcp.smart_folders as mcp_smart_folders
+import mcp_server.access as mcp_access
+import mcp_server.attachments as mcp_attachments
+import mcp_server.backups as mcp_backups
+import mcp_server.bases as mcp_bases
+import mcp_server.embeddings as mcp_embeddings
+import mcp_server.exports as mcp_exports
+import mcp_server.links as mcp_links
+import mcp_server.merges as mcp_merges
+import mcp_server.pages as mcp_pages
+import mcp_server.sharing as mcp_sharing
+import mcp_server.smart_folders as mcp_smart_folders
 import services.bases as bases_state
 from api.main import app
 from database import (

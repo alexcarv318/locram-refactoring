@@ -1,4 +1,4 @@
-import mcp.sharing as mcp_sharing
+import mcp_server.sharing as mcp_sharing
 from schemas.sharing import ShareGrantPermission
 from services.sharing import SharingService
 

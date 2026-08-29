@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-import mcp.bases as mcp_bases
+import mcp_server.bases as mcp_bases
 from exceptions.bases import ActiveBaseError, BaseNotFoundError, WorkingBaseNotFoundError
 from schemas.bases import AgentAccessMode
 from services.bases import BaseRegistryService

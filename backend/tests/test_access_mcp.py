@@ -1,4 +1,4 @@
-import mcp.access as mcp_access
+import mcp_server.access as mcp_access
 from schemas.access import AccessState
 from services.access import AccessService
 

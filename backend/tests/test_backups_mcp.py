@@ -1,4 +1,4 @@
-import mcp.backups as mcp_backups
+import mcp_server.backups as mcp_backups
 from services.backups import BackupService
 
 

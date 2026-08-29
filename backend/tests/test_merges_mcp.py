@@ -1,4 +1,4 @@
-import mcp.merges as mcp_merges
+import mcp_server.merges as mcp_merges
 from schemas.exports import ExportScope
 from services.exports import ExportService
 from services.merges import MergeService

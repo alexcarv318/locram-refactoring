@@ -1,7 +1,7 @@
 import pytest
 
-import mcp.links as mcp_links
-import mcp.pages as mcp_pages
+import mcp_server.links as mcp_links
+import mcp_server.pages as mcp_pages
 from exceptions.links import SelfLinkError
 from exceptions.pages import HubParentError
 from schemas.links import LinkCreate, LinkType

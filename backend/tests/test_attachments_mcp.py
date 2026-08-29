@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import mcp.attachments as mcp_attachments
+import mcp_server.attachments as mcp_attachments
 from exceptions.attachments import AttachmentNotFoundError, InvalidAttachmentFilenameError
 from schemas.attachments import MermaidFormat
 from services.attachments import AttachmentService

@@ -1,6 +1,6 @@
 import pytest
 
-import mcp.smart_folders as mcp_smart_folders
+import mcp_server.smart_folders as mcp_smart_folders
 from exceptions.smart_folders import SmartFolderPreviewError
 from schemas.pages import PageCreate
 from schemas.smart_folders import ORPHANED_SCOPE_ID, FilterState

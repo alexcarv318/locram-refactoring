@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import mcp.exports as mcp_exports
+import mcp_server.exports as mcp_exports
 from services.exports import ExportService
 
 
