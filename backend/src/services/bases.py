@@ -114,6 +114,15 @@ class BaseRegistryService(IBaseRegistryService):
         database.knowledge_engines.clear()
         return self._to_record(self._require_entry(entry_id))
 
+    def replace_active(self, path: str) -> RegistryEntryRecord:
+        previous = self.get_active()
+        activated = self.register(path, activate=True, display_name=None)
+
+        if previous is not None and previous.entry_id != activated.entry_id:
+            self.unregister(previous.entry_id)
+
+        return activated
+
     def unregister(self, entry_id: str) -> None:
         entry = self._require_entry(entry_id)
 

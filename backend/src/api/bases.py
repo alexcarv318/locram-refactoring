@@ -5,9 +5,12 @@ from interfaces.services.bases import IBaseRegistryService
 from schemas.bases import (
     AgentAccessModeUpdate,
     BaseCreateRequest,
+    BaseDeletedResponse,
     BaseDeleteRequest,
     BaseRegisterRequest,
     BaseRenameRequest,
+    BaseReplaceActiveRequest,
+    BaseUnregisteredResponse,
     RegistryEntryListResponse,
     RegistryEntryResponse,
 )
@@ -47,6 +50,14 @@ def create_base(
     )
 
 
+@bases_router.post("/replace-active", response_model=RegistryEntryResponse)
+def replace_active_base(
+    payload: BaseReplaceActiveRequest,
+    base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
+) -> RegistryEntryResponse:
+    return RegistryEntryResponse(item=base_registry_service.replace_active(payload.path))
+
+
 @bases_router.post("/{entry_id}/switch", response_model=RegistryEntryResponse)
 def switch_base(
     entry_id: str,
@@ -55,12 +66,14 @@ def switch_base(
     return RegistryEntryResponse(item=base_registry_service.switch(entry_id))
 
 
-@bases_router.post("/{entry_id}/unregister", status_code=204)
+@bases_router.post("/{entry_id}/unregister", response_model=BaseUnregisteredResponse)
 def unregister_base(
     entry_id: str,
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
-) -> None:
+) -> BaseUnregisteredResponse:
     base_registry_service.unregister(entry_id)
+
+    return BaseUnregisteredResponse(removed=True, entry_id=entry_id)
 
 
 @bases_router.put("/{entry_id}/rename", response_model=RegistryEntryResponse)
@@ -72,21 +85,22 @@ def rename_base(
     return RegistryEntryResponse(item=base_registry_service.rename(entry_id, payload.display_name))
 
 
-@bases_router.post("/{entry_id}/delete", status_code=204)
+@bases_router.post("/{entry_id}/delete", response_model=BaseDeletedResponse)
 def delete_base(
     entry_id: str,
     payload: BaseDeleteRequest,
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
-) -> None:
+) -> BaseDeletedResponse:
+    path = base_registry_service.get_entry(entry_id).path
     base_registry_service.delete(entry_id, payload.force)
 
+    return BaseDeletedResponse(deleted=True, path=path)
 
-@bases_router.patch("/{entry_id}/mcp-visibility", response_model=RegistryEntryResponse)
+
+@bases_router.post("/{entry_id}/mcp-visibility", response_model=RegistryEntryResponse)
 def set_base_mcp_visibility(
     entry_id: str,
     payload: AgentAccessModeUpdate,
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
 ) -> RegistryEntryResponse:
-    return RegistryEntryResponse(
-        item=base_registry_service.set_agent_access_mode(entry_id, payload.agent_access_mode)
-    )
+    return RegistryEntryResponse(item=base_registry_service.set_agent_access_mode(entry_id, payload.agent_access_mode))

@@ -167,6 +167,20 @@ def test_switch_missing_file_and_missing_entry(
         base_registry_service.get_entry("01MISSINGENTRY00000000000000")
 
 
+def test_replace_active_registers_and_drops_the_previous_active(
+    base_registry_service: BaseRegistryService,
+    tmp_path: Path,
+) -> None:
+    previous = base_registry_service.create(str(tmp_path / "old.db"), "Old", activate=True)
+    next_base = base_registry_service.create(str(tmp_path / "new.db"), "New", activate=False)
+    replaced = base_registry_service.replace_active(next_base.path)
+    items = base_registry_service.list_bases()
+
+    assert replaced.entry_id == next_base.entry_id
+    assert replaced.is_active is True
+    assert previous.entry_id not in {item.entry_id for item in items}
+
+
 def test_force_delete_active_switches_to_replacement(
     base_registry_service: BaseRegistryService,
     tmp_path: Path,

@@ -43,6 +43,20 @@ class BaseDeleteRequest(BaseModel):
     force: bool = False
 
 
+class BaseReplaceActiveRequest(BaseModel):
+    path: str
+
+
+class BaseUnregisteredResponse(BaseModel):
+    removed: bool
+    entry_id: str
+
+
+class BaseDeletedResponse(BaseModel):
+    deleted: bool
+    path: str
+
+
 class AgentAccessModeUpdate(BaseModel):
     agent_access_mode: AgentAccessMode
 

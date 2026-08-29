@@ -39,6 +39,9 @@ class IBaseRegistryService(ABC):
     def switch(self, entry_id: str) -> RegistryEntryRecord: ...
 
     @abstractmethod
+    def replace_active(self, path: str) -> RegistryEntryRecord: ...
+
+    @abstractmethod
     def unregister(self, entry_id: str) -> None: ...
 
     @abstractmethod

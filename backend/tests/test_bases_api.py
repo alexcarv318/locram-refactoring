@@ -28,7 +28,7 @@ def test_http_base_lifecycle(client: TestClient, tmp_path: Path) -> None:
 
     switched = client.post(f"/api/bases/{other_id}/switch")
     renamed = client.put(f"/api/bases/{other_id}/rename", json={"display_name": "Beta Two"})
-    visibility = client.patch(
+    visibility = client.post(
         f"/api/bases/{other_id}/mcp-visibility",
         json={"agent_access_mode": "read"},
     )
@@ -45,7 +45,8 @@ def test_http_base_lifecycle(client: TestClient, tmp_path: Path) -> None:
 
     removed = client.post(f"/api/bases/{entry_id}/unregister")
 
-    assert removed.status_code == 204
+    assert removed.status_code == 200
+    assert removed.json() == {"removed": True, "entry_id": entry_id}
 
 
 def test_http_register_existing_file(
@@ -89,5 +90,31 @@ def test_http_base_errors_and_force_delete(client: TestClient, tmp_path: Path) -
     deleted = client.post(f"/api/bases/{active_id}/delete", json={"force": True})
     listed = client.get("/api/bases")
 
-    assert deleted.status_code == 204
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert deleted.json()["path"] == active.json()["item"]["path"]
     assert listed.json()["active_base"]["entry_id"] == spare_id
+
+
+def test_http_replace_active(client: TestClient, tmp_path: Path) -> None:
+    current = client.post(
+        "/api/bases/create",
+        json={"path": str(tmp_path / "old.db"), "display_name": "Old", "activate": True},
+    )
+    replacement = client.post(
+        "/api/bases/create",
+        json={"path": str(tmp_path / "new.db"), "display_name": "New", "activate": False},
+    )
+    replaced = client.post(
+        "/api/bases/replace-active",
+        json={"path": replacement.json()["item"]["path"]},
+    )
+    listed = client.get("/api/bases")
+
+    assert replaced.status_code == 200
+    assert replaced.json()["item"]["entry_id"] == replacement.json()["item"]["entry_id"]
+    assert replaced.json()["item"]["is_active"] is True
+    assert listed.json()["active_base"]["entry_id"] == replacement.json()["item"]["entry_id"]
+    assert current.json()["item"]["entry_id"] not in {
+        item["entry_id"] for item in listed.json()["items"]
+    }
