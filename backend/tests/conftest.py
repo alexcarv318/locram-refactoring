@@ -192,6 +192,11 @@ def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
         tmp_path / "preferences" / "accepted-shares.json",
     )
     monkeypatch.setattr(database, "managed_bases_path", tmp_path / "managed-bases")
+    monkeypatch.setattr(
+        database,
+        "hosted_embedding_bootstrap_path",
+        tmp_path / "preferences" / "hosted-embedding-bootstrap.json",
+    )
     database.knowledge_engines.clear()
     get_registry_engine.cache_clear()
     bases_state.selected_working_base_ref = None
@@ -246,6 +251,11 @@ def embedding_service(db: Session) -> EmbeddingService:
     return EmbeddingService(
         EmbeddingRepository(db),
         PageRepository(db),
+        AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        ),
         NullEmbeddingProvider(),
     )
 

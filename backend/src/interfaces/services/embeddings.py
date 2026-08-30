@@ -30,7 +30,8 @@ class IEmbeddingService(ABC):
     """Embeddings: page vectors, stale detection, and hybrid search.
 
     Reciprocal-rank fusion of FTS and cosine similarity, with lexical fallback.
-    Desktop settings choose hosted, Hugging Face, or Ollama.
+    Desktop settings choose hosted, Hugging Face, or Ollama. Hosted prefers
+    the enrolled Access relay token and otherwise mints a bootstrap token.
     """
 
     @abstractmethod

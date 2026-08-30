@@ -1,5 +1,4 @@
 from dependencies import (
-    get_embedding_provider,
     get_embedding_repository,
     get_page_repository,
     get_session,
@@ -22,7 +21,6 @@ def get_embedding_service(base_ref: str | None = None, write: bool = False) -> I
     return load_embedding_service(
         get_embedding_repository(db),
         get_page_repository(db),
-        get_embedding_provider(),
     )
 
 

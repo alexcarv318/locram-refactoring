@@ -27,7 +27,7 @@ from interfaces.services.backups import IBackupService
 from interfaces.services.bases import IBaseRegistryService
 from interfaces.services.bridge import IBridgeService
 from interfaces.services.changes import IChangeService
-from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
+from interfaces.services.embeddings import IEmbeddingService
 from interfaces.services.exports import IExportService
 from interfaces.services.links import ILinkService
 from interfaces.services.merges import IMergeService
@@ -53,7 +53,7 @@ from services.backups import BackupService
 from services.bases import BaseRegistryService
 from services.bridge import BridgeService
 from services.changes import ChangeService
-from services.embeddings import EmbeddingService, build_embedding_provider
+from services.embeddings import EmbeddingService
 from services.exports import ExportService
 from services.links import LinkService
 from services.merges import MergeService
@@ -273,19 +273,14 @@ def get_export_repository(base_ref: str | None, write: bool) -> IExportRepositor
     return ExportRepository(source_path=Path(working_base.path))
 
 
-def get_embedding_provider() -> IEmbeddingProvider:
-    return build_embedding_provider(access_repository=get_access_repository())
-
-
 def get_embedding_service(
     embedding_repository: IEmbeddingRepository = Depends(get_embedding_repository),
     page_repository: IPageRepository = Depends(get_page_repository),
-    embedding_provider: IEmbeddingProvider = Depends(get_embedding_provider),
 ) -> IEmbeddingService:
     return EmbeddingService(
         embedding_repository=embedding_repository,
         page_repository=page_repository,
-        embedding_provider=embedding_provider,
+        access_repository=get_access_repository(),
     )
 
 

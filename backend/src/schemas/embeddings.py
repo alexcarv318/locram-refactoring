@@ -121,6 +121,22 @@ class EmbeddingBootstrapResult(BaseModel):
     status_lines: list[str]
 
 
+class HostedEmbeddingBootstrapCredential(BaseModel):
+    installation_id: str
+    token: str
+    model: str
+    expires_at: str
+    updated_at: str
+
+
+class HostedBootstrapTokenResponse(BaseModel):
+    installation_id: str
+    model: str
+    expires_at: str
+    access_token: str | None = None
+    token: str | None = None
+
+
 class HostedEmbeddingItem(BaseModel):
     embedding: list[float]
 

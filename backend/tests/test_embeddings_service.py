@@ -2,7 +2,9 @@ import struct
 
 from sqlalchemy.orm import Session
 
+import database
 from interfaces.services.embeddings import IEmbeddingProvider
+from repositories.access import AccessRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.pages import PageRepository
 from schemas.pages import PageCreate
@@ -75,6 +77,11 @@ def test_hybrid_search_merges_semantic_hits(page_service: PageService, db: Sessi
     service = EmbeddingService(
         EmbeddingRepository(db),
         PageRepository(db),
+        AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        ),
         FakeEmbeddingProvider(),
     )
     alpha = page_service.create_page(PageCreate(title="Alpha", content="alpha systems"))

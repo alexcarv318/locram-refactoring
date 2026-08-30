@@ -1,11 +1,14 @@
 import json
 import os
+import secrets
 import struct
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
+
+from pydantic import ValidationError
 
 import database
 from exceptions.embeddings import (
@@ -18,7 +21,6 @@ from interfaces.repositories.access import IAccessRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
-from repositories.access import AccessRepository
 from schemas.embeddings import (
     EmbeddingBootstrapResult,
     EmbeddingCoverage,
@@ -27,6 +29,8 @@ from schemas.embeddings import (
     EmbeddingSettingsPatch,
     EmbeddingStoreResponse,
     EmbedRunResult,
+    HostedBootstrapTokenResponse,
+    HostedEmbeddingBootstrapCredential,
     HostedEmbeddingResponse,
     HuggingFaceValidationResult,
     HybridSearchHit,
@@ -210,68 +214,6 @@ class LocramHostedEmbeddingProvider(IEmbeddingProvider):
         return parsed.data[0].embedding
 
 
-def build_embedding_provider(
-    settings_path: Path | None = None,
-    huggingface_api_key_path: Path | None = None,
-    access_repository: IAccessRepository | None = None,
-) -> IEmbeddingProvider:
-    settings, api_key = read_embedding_settings(
-        settings_path or database.embedding_settings_path,
-        huggingface_api_key_path or database.huggingface_api_key_path,
-    )
-
-    if settings.provider is EmbeddingProviderKind.OLLAMA:
-        return OllamaEmbeddingProvider(settings.ollama_url, settings.model)
-
-    if settings.provider is EmbeddingProviderKind.HUGGINGFACE and api_key != "":
-        return HuggingFaceEmbeddingProvider(api_key, settings.model)
-
-    if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
-        repository = access_repository or AccessRepository(
-            database.access_path,
-            database.access_credentials_path,
-            database.accepted_shares_path,
-        )
-        record = repository.load()
-
-        if record is not None and record.identity is not None:
-            relay_token = record.credential_data.get("relay_token", "").strip()
-
-            if relay_token != "":
-                return LocramHostedEmbeddingProvider(
-                    record.identity,
-                    relay_token,
-                    settings.model,
-                    settings.hosted_url,
-                )
-
-    return NullEmbeddingProvider()
-
-
-def read_embedding_settings(
-    settings_path: Path,
-    huggingface_api_key_path: Path,
-) -> tuple[EmbeddingSettings, str]:
-    settings = EmbeddingSettings()
-
-    if settings_path.is_file():
-        settings = EmbeddingSettings.model_validate_json(settings_path.read_text())
-
-    api_key = ""
-
-    if huggingface_api_key_path.is_file():
-        api_key = huggingface_api_key_path.read_text().strip()
-
-    if api_key == "":
-        api_key = os.environ.get("LOCRAM_EMBED_API_KEY", "").strip()
-
-    if api_key == "":
-        api_key = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
-
-    settings.huggingface_api_key_configured = api_key != ""
-    return settings, api_key
-
-
 class EmbeddingService(IEmbeddingService):
     _RECIPROCAL_RANK_OFFSET = 60
     _VECTOR_BACKEND = "python-cosine"
@@ -280,17 +222,19 @@ class EmbeddingService(IEmbeddingService):
         self,
         embedding_repository: IEmbeddingRepository,
         page_repository: IPageRepository,
-        embedding_provider: IEmbeddingProvider,
+        access_repository: IAccessRepository,
+        embedding_provider: IEmbeddingProvider | None = None,
         settings_path: Path | None = None,
         huggingface_api_key_path: Path | None = None,
+        bootstrap_path: Path | None = None,
     ) -> None:
         self._embedding_repository = embedding_repository
         self._page_repository = page_repository
-        self._embedding_provider = embedding_provider
+        self._access_repository = access_repository
+        self._fixed_provider = embedding_provider
         self._settings_path = settings_path or database.embedding_settings_path
-        self._huggingface_api_key_path = (
-            huggingface_api_key_path or database.huggingface_api_key_path
-        )
+        self._huggingface_api_key_path = huggingface_api_key_path or database.huggingface_api_key_path
+        self._bootstrap_path = bootstrap_path or database.hosted_embedding_bootstrap_path
 
     def store_embedding(
         self,
@@ -327,17 +271,18 @@ class EmbeddingService(IEmbeddingService):
         return UnembeddedResponse(page_ids=self._embedding_repository.find_stale(model, limit))
 
     def hybrid_search(self, query: str, limit: int) -> HybridSearchResult:
+        provider = self.provider()
         fts_hits = self._page_repository.search(query, limit * 2)
         coverage = self._embedding_repository.get_coverage(self._active_model())
 
-        if not self._embedding_provider.ready:
+        if not provider.ready:
             return self._lexical_only(fts_hits, limit, coverage, "SEMANTIC_NOT_CONFIGURED")
 
         try:
-            query_vector = self._embedding_provider.embed(query)
+            query_vector = provider.embed(query)
             vector_hits = self._embedding_repository.search_similar(
                 query_vector,
-                self._embedding_provider.model,
+                provider.model,
                 limit * 2,
             )
         except (EmbeddingProviderNotReadyError, EmbeddingProviderError):
@@ -354,7 +299,7 @@ class EmbeddingService(IEmbeddingService):
         )
 
     def capability_status(self) -> SearchCapabilityStatus:
-        provider_ready = self._embedding_provider.ready
+        provider_ready = self.provider().ready
         model = self._active_model()
 
         return SearchCapabilityStatus(
@@ -369,7 +314,9 @@ class EmbeddingService(IEmbeddingService):
         )
 
     def run_embed(self, force: bool, limit: int) -> EmbedRunResult:
-        if not self._embedding_provider.ready:
+        provider = self.provider()
+
+        if not provider.ready:
             return EmbedRunResult(
                 embedded=0,
                 skipped=0,
@@ -378,7 +325,7 @@ class EmbeddingService(IEmbeddingService):
                 warning="Embedding provider is not configured",
             )
 
-        model = self._embedding_provider.model
+        model = provider.model
 
         if force:
             page_ids = [
@@ -406,7 +353,7 @@ class EmbeddingService(IEmbeddingService):
                 continue
 
             try:
-                vector = self._embedding_provider.embed(self._embed_text(page.title, page.content))
+                vector = provider.embed(self._embed_text(page.title, page.content))
                 self._embedding_repository.store(
                     page.id,
                     "content",
@@ -434,18 +381,12 @@ class EmbeddingService(IEmbeddingService):
         )
 
     def get_settings(self) -> EmbeddingSettings:
-        settings, _api_key = read_embedding_settings(
-            self._settings_path,
-            self._huggingface_api_key_path,
-        )
+        settings, _api_key = self._load_settings()
 
         return settings
 
     def update_settings(self, payload: EmbeddingSettingsPatch) -> EmbeddingSettings:
-        settings, api_key = read_embedding_settings(
-            self._settings_path,
-            self._huggingface_api_key_path,
-        )
+        settings, api_key = self._load_settings()
         updates = payload.model_dump(
             exclude_unset=True,
             exclude={"huggingface_api_key", "clear_huggingface_api_key"},
@@ -474,10 +415,7 @@ class EmbeddingService(IEmbeddingService):
         return settings
 
     def validate_huggingface(self, draft_api_key: str | None) -> HuggingFaceValidationResult:
-        settings, stored_key = read_embedding_settings(
-            self._settings_path,
-            self._huggingface_api_key_path,
-        )
+        settings, stored_key = self._load_settings()
         api_key = stored_key
 
         if draft_api_key is not None:
@@ -498,7 +436,11 @@ class EmbeddingService(IEmbeddingService):
 
     def bootstrap(self) -> EmbeddingBootstrapResult:
         settings = self.get_settings()
-        provider = build_embedding_provider(self._settings_path, self._huggingface_api_key_path)
+
+        if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+            self._hosted_bootstrap(settings)
+
+        provider = self.provider()
 
         return EmbeddingBootstrapResult(
             status_lines=[
@@ -506,6 +448,184 @@ class EmbeddingService(IEmbeddingService):
                 f"model={settings.model}",
                 f"ready={provider.ready}",
             ]
+        )
+
+    def provider(self) -> IEmbeddingProvider:
+        if self._fixed_provider is not None:
+            return self._fixed_provider
+
+        settings, api_key = self._load_settings()
+
+        if settings.provider is EmbeddingProviderKind.OLLAMA:
+            return OllamaEmbeddingProvider(settings.ollama_url, settings.model)
+
+        if settings.provider is EmbeddingProviderKind.HUGGINGFACE and api_key != "":
+            return HuggingFaceEmbeddingProvider(api_key, settings.model)
+
+        if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+            hosted = self._hosted_provider(settings)
+
+            if hosted is not None:
+                return hosted
+
+        return NullEmbeddingProvider()
+
+    def _load_settings(self) -> tuple[EmbeddingSettings, str]:
+        settings = EmbeddingSettings()
+
+        if self._settings_path.is_file():
+            settings = EmbeddingSettings.model_validate_json(self._settings_path.read_text())
+
+        api_key = ""
+
+        if self._huggingface_api_key_path.is_file():
+            api_key = self._huggingface_api_key_path.read_text().strip()
+
+        if api_key == "":
+            api_key = os.environ.get("LOCRAM_EMBED_API_KEY", "").strip()
+
+        if api_key == "":
+            api_key = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
+
+        settings.huggingface_api_key_configured = api_key != ""
+        return settings, api_key
+
+    def _hosted_provider(
+        self,
+        settings: EmbeddingSettings,
+    ) -> LocramHostedEmbeddingProvider | None:
+        record = self._access_repository.load()
+
+        if record is not None and record.identity is not None:
+            relay_token = record.credential_data.get("relay_token", "").strip()
+
+            if relay_token != "":
+                return LocramHostedEmbeddingProvider(
+                    record.identity,
+                    relay_token,
+                    settings.model,
+                    settings.hosted_url,
+                )
+
+        cached = self._hosted_bootstrap_record()
+
+        if cached is not None and not self._hosted_bootstrap_is_stale(cached, settings.model):
+            return LocramHostedEmbeddingProvider(
+                cached.installation_id,
+                cached.token,
+                settings.model,
+                settings.hosted_url,
+            )
+
+        return None
+
+    def _hosted_bootstrap_record(self) -> HostedEmbeddingBootstrapCredential | None:
+        if not self._bootstrap_path.is_file():
+            return None
+
+        try:
+            return HostedEmbeddingBootstrapCredential.model_validate_json(
+                self._bootstrap_path.read_text()
+            )
+        except ValidationError:
+            return None
+
+    @staticmethod
+    def _hosted_bootstrap_is_stale(
+        record: HostedEmbeddingBootstrapCredential,
+        model: str,
+    ) -> bool:
+        if record.model != model:
+            return True
+
+        try:
+            expires_at = datetime.fromisoformat(record.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+
+        remaining_seconds = (expires_at - datetime.now(UTC)).total_seconds()
+        return remaining_seconds <= 3600
+
+    def _hosted_bootstrap(
+        self,
+        settings: EmbeddingSettings,
+    ) -> HostedEmbeddingBootstrapCredential:
+        cached = self._hosted_bootstrap_record()
+
+        if cached is not None and not self._hosted_bootstrap_is_stale(cached, settings.model):
+            return cached
+
+        installation_id = secrets.token_hex(16)
+
+        if cached is not None:
+            installation_id = cached.installation_id
+
+        issued = self._request_hosted_bootstrap(
+            settings.hosted_url,
+            installation_id,
+            settings.model,
+        )
+        self._bootstrap_path.parent.mkdir(parents=True, exist_ok=True)
+        self._bootstrap_path.write_text(issued.model_dump_json(indent=2))
+        return issued
+
+    def _request_hosted_bootstrap(
+        self,
+        hosted_url: str,
+        installation_id: str,
+        model: str,
+    ) -> HostedEmbeddingBootstrapCredential:
+        payload = json.dumps({"installation_id": installation_id, "model": model}).encode()
+        request = urllib.request.Request(
+            url=f"{hosted_url.rstrip('/')}/v1/bootstrap-token",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "locram (locram-hosted-bootstrap)",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = response.read()
+        except urllib.error.HTTPError as error:
+            raise EmbeddingProviderError(
+                f"Locram hosted bootstrap returned HTTP {error.code}",
+                status_code=502,
+            ) from error
+        except urllib.error.URLError as error:
+            raise EmbeddingProviderError(
+                f"Cannot reach Locram hosted bootstrap at {hosted_url}",
+                status_code=502,
+            ) from error
+
+        try:
+            parsed = HostedBootstrapTokenResponse.model_validate_json(body)
+        except ValidationError as error:
+            raise EmbeddingProviderError(
+                "Locram hosted bootstrap response was incomplete.",
+                status_code=502,
+            ) from error
+
+        token = parsed.access_token or parsed.token
+
+        if token is None or token.strip() == "":
+            raise EmbeddingProviderError(
+                "Locram hosted bootstrap response was incomplete.",
+                status_code=502,
+            )
+
+        return HostedEmbeddingBootstrapCredential(
+            installation_id=parsed.installation_id.strip(),
+            token=token.strip(),
+            model=parsed.model.strip(),
+            expires_at=parsed.expires_at.strip(),
+            updated_at=self._now(),
         )
 
     @staticmethod
@@ -583,10 +703,12 @@ class EmbeddingService(IEmbeddingService):
         return ordered[:limit]
 
     def _active_model(self) -> str | None:
-        if not self._embedding_provider.ready:
+        provider = self.provider()
+
+        if not provider.ready:
             return None
 
-        return self._embedding_provider.model
+        return provider.model
 
     @staticmethod
     def _embed_text(title: str, content: str) -> str:

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Body, Depends, Query
 
 from dependencies import (
-    get_embedding_provider,
     get_embedding_repository,
     get_embedding_service,
     get_page_repository,
@@ -100,7 +99,6 @@ def run_desktop_embed(payload: DesktopEmbedRunRequest) -> EmbedRunResponse:
         embedding_service = get_embedding_service(
             embedding_repository=get_embedding_repository(db=session),
             page_repository=get_page_repository(db=session),
-            embedding_provider=get_embedding_provider(),
         )
         result = embedding_service.run_embed(payload.force, payload.limit)
         result.requested_base_id = payload.base_id
