@@ -1,9 +1,7 @@
 import shutil
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from alembic.script import ScriptDirectory
 from sqlalchemy import select
 from ulid import ULID
 
@@ -21,7 +19,7 @@ from exceptions.bases import (
     WorkingBaseNotFoundError,
     WorkingBaseReadOnlyError,
 )
-from interfaces.repositories.bases import IBaseRegistryRepository
+from interfaces.repositories.bases import IBaseRegistryRepository, IManagedBaseRepository
 from interfaces.services.access import IAccessService
 from interfaces.services.bases import IBaseRegistryService
 from models.bases import BaseMetadata, RegistryEntry
@@ -46,9 +44,11 @@ class BaseRegistryService(IBaseRegistryService):
     def __init__(
         self,
         base_registry_repository: IBaseRegistryRepository,
+        managed_base_repository: IManagedBaseRepository,
         access_service: IAccessService | None = None,
     ) -> None:
         self._base_registry_repository = base_registry_repository
+        self._managed_base_repository = managed_base_repository
         self._access_service = access_service
 
     def list_bases(self) -> list[RegistryEntryRecord]:
@@ -339,7 +339,7 @@ class BaseRegistryService(IBaseRegistryService):
             mounted_version=None,
             updated_at=updated_at,
             path=str(snapshot.resolve()),
-            base_id=self._read_managed_base_id(snapshot),
+            base_id=self._managed_base_repository.read_base_id(snapshot),
             source_url=None,
             integrity_ref=None,
             bootstrap_source="packaged_seed",
@@ -365,31 +365,9 @@ class BaseRegistryService(IBaseRegistryService):
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-        self._stamp_managed_snapshot(destination)
+        self._managed_base_repository.stamp_schema_version(destination)
+        self._managed_base_repository.install_pages_search_index(destination)
         return destination
-
-    @staticmethod
-    def _stamp_managed_snapshot(path: Path) -> None:
-        head = ScriptDirectory.from_config(database.alembic_config()).get_current_head()
-
-        if head is None:
-            return
-
-        connection = sqlite3.connect(path)
-
-        try:
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS alembic_version ("
-                "version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-            )
-            connection.execute("DELETE FROM alembic_version")
-            connection.execute(
-                "INSERT INTO alembic_version (version_num) VALUES (?)",
-                (head,),
-            )
-            connection.commit()
-        finally:
-            connection.close()
 
     @staticmethod
     def _managed_kind(kind: str) -> ManagedBaseKind:
@@ -398,27 +376,6 @@ class BaseRegistryService(IBaseRegistryService):
                 return managed_kind
 
         raise ManagedBaseKindError(kind)
-
-    @staticmethod
-    def _read_managed_base_id(path: Path) -> str | None:
-        connection = sqlite3.connect(path)
-
-        try:
-            exists = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'base_metadata'"
-            ).fetchone()
-
-            if exists is None:
-                return None
-
-            row = connection.execute("SELECT base_id FROM base_metadata LIMIT 1").fetchone()
-
-            if row is None:
-                return None
-
-            return str(row[0])
-        finally:
-            connection.close()
 
     def _shared_working_bases(self) -> list[WorkingBaseRecord]:
         if self._access_service is None:

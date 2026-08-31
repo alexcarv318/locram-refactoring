@@ -47,7 +47,7 @@ from interfaces.services.smart_folders import ISmartFolderService
 from models.bases import BaseMetadata
 from repositories.access import AccessRepository
 from repositories.backups import BackupRepository
-from repositories.bases import BaseRegistryRepository
+from repositories.bases import BaseRegistryRepository, ManagedBaseRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
 from repositories.links import LinkRepository
@@ -377,7 +377,10 @@ def smart_folder_service(
 @pytest.fixture
 def base_registry_service() -> BaseRegistryService:
     session = create_session_factory(get_registry_engine())()
-    return BaseRegistryService(BaseRegistryRepository(session))
+    return BaseRegistryService(
+        BaseRegistryRepository(session),
+        ManagedBaseRepository(),
+    )
 
 
 @pytest.fixture

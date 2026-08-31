@@ -1,6 +1,17 @@
 from pydantic import BaseModel
 
 
+class KnowledgeFileStats(BaseModel):
+    page_count: int | None = None
+    active_page_count: int | None = None
+    embedded_count: int | None = None
+    link_count: int | None = None
+    size_bytes: int | None = None
+    orphan_count: int | None = None
+    unembedded_count: int | None = None
+    due_for_review_count: int | None = None
+
+
 class BackupRecord(BaseModel):
     filename: str
     path: str

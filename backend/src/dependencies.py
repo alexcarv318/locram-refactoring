@@ -12,7 +12,7 @@ from database import apply_migrations, create_session_factory, create_sqlite_eng
 from exceptions.bases import WorkingBaseNotFoundError
 from interfaces.repositories.access import IAccessRepository
 from interfaces.repositories.backups import IBackupRepository
-from interfaces.repositories.bases import IBaseRegistryRepository
+from interfaces.repositories.bases import IBaseRegistryRepository, IManagedBaseRepository
 from interfaces.repositories.changes import IChangeRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.exports import IExportRepository
@@ -36,7 +36,7 @@ from interfaces.services.sharing import ISharingService
 from interfaces.services.smart_folders import ISmartFolderService
 from repositories.access import AccessRepository
 from repositories.backups import BackupRepository
-from repositories.bases import BaseRegistryRepository
+from repositories.bases import BaseRegistryRepository, ManagedBaseRepository
 from repositories.changes import ChangeRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
@@ -92,6 +92,10 @@ def get_base_registry_repository(
     return BaseRegistryRepository(db)
 
 
+def get_managed_base_repository() -> IManagedBaseRepository:
+    return ManagedBaseRepository()
+
+
 def get_access_repository() -> IAccessRepository:
     return AccessRepository(
         database.access_path,
@@ -131,10 +135,12 @@ def get_access_service(
 
 def get_base_registry_service(
     base_registry_repository: IBaseRegistryRepository = Depends(get_base_registry_repository),
+    managed_base_repository: IManagedBaseRepository = Depends(get_managed_base_repository),
     access_service: IAccessService = Depends(get_access_service),
 ) -> IBaseRegistryService:
     return BaseRegistryService(
         base_registry_repository=base_registry_repository,
+        managed_base_repository=managed_base_repository,
         access_service=access_service,
     )
 
@@ -150,6 +156,7 @@ def get_working_base(base_ref: str | None, write: bool) -> WorkingBaseRecord:
     )
     base_registry_service = get_base_registry_service(
         base_registry_repository=base_registry_repository,
+        managed_base_repository=get_managed_base_repository(),
         access_service=access_service,
     )
 

@@ -13,8 +13,8 @@ class IBaseRegistryService(ABC):
 
     Create, register, switch, rename, delete, access mode, and working-base
     selection. `managed:` snapshot bases copy packaged seeds into
-    `managed-bases/` on refresh. Accepted `shared:` shares are selectable
-    working bases.
+    `managed-bases/` on refresh and install `pages_search_index`. Accepted
+    `shared:` shares are selectable working bases.
     """
 
     @abstractmethod

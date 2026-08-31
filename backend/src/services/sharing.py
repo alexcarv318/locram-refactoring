@@ -1,4 +1,3 @@
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -818,79 +817,9 @@ class SharingService(ISharingService):
 
     @staticmethod
     def _read_base_stats(path: Path) -> BaseShareStats:
-        size_bytes = path.stat().st_size if path.is_file() else 0
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-
-        try:
-            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            return BaseShareStats(
-                page_count=SharingService._count(
-                    connection,
-                    "SELECT COUNT(*) FROM pages WHERE status != 'to_delete'",
-                ),
-                active_page_count=SharingService._count(
-                    connection,
-                    "SELECT COUNT(*) FROM pages WHERE status = 'active'",
-                ),
-                embedded_count=SharingService._optional_count(
-                    connection,
-                    "SELECT COUNT(DISTINCT page_id) FROM page_embeddings WHERE field = 'content'",
-                ),
-                link_count=SharingService._count(connection, "SELECT COUNT(*) FROM links"),
-                size_bytes=size_bytes,
-                orphan_count=SharingService._count(
-                    connection,
-                    "SELECT COUNT(*) FROM pages "
-                    "WHERE status = 'active' AND parent_id IS NULL "
-                    "AND id NOT IN (SELECT source_id FROM links) "
-                    "AND id NOT IN (SELECT target_id FROM links)",
-                ),
-                unembedded_count=SharingService._optional_count(
-                    connection,
-                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
-                    "AND id NOT IN ("
-                    "SELECT page_id FROM page_embeddings WHERE field = 'content'"
-                    ")",
-                ),
-                due_for_review_count=SharingService._count(
-                    connection,
-                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
-                    "AND type != 'fleeting' AND datetime("
-                    "COALESCE(reviewed_at, updated_at), "
-                    "'+' || review_interval_days || ' days'"
-                    ") <= ?",
-                    (now,),
-                ),
-            )
-        except sqlite3.Error:
-            return BaseShareStats(size_bytes=size_bytes)
-        finally:
-            connection.close()
-
-    @staticmethod
-    def _count(
-        connection: sqlite3.Connection,
-        statement: str,
-        parameters: tuple[str, ...] = (),
-    ) -> int:
-        row = connection.execute(statement, parameters).fetchone()
-
-        if row is None or row[0] is None:
-            return 0
-
-        return int(row[0])
-
-    @staticmethod
-    def _optional_count(
-        connection: sqlite3.Connection,
-        statement: str,
-        parameters: tuple[str, ...] = (),
-    ) -> int | None:
-        try:
-            return SharingService._count(connection, statement, parameters)
-        except sqlite3.Error:
-            return None
+        return BaseShareStats.model_validate(
+            BackupRepository(source_path=path).read_stats(path).model_dump()
+        )
 
     @staticmethod
     def _now() -> str:

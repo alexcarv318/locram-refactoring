@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from database import open_knowledge_session
 from exceptions.bases import (
@@ -281,3 +281,39 @@ def test_refreshed_managed_base_can_open_pages(
 
     assert count is not None
     assert count > 0
+
+
+def test_managed_seed_search_uses_pages_search_index(
+    base_registry_service: BaseRegistryService,
+) -> None:
+    ggl = base_registry_service.refresh_managed_base("ggl")
+    documentation = base_registry_service.refresh_managed_base("documentation")
+    ggl_session = open_knowledge_session(Path(ggl.path))
+    documentation_session = open_knowledge_session(Path(documentation.path))
+
+    try:
+        ggl_hits = PageService(
+            PageRepository(ggl_session),
+            LinkRepository(ggl_session),
+        ).search_pages("Routing", limit=10)
+        documentation_hits = PageService(
+            PageRepository(documentation_session),
+            LinkRepository(documentation_session),
+        ).search_pages("Responsibility", limit=10)
+        leftover_ggl = ggl_session.execute(
+            text("SELECT name FROM sqlite_master WHERE name = 'pages_fts'")
+        ).scalar()
+        leftover_documentation = documentation_session.execute(
+            text("SELECT name FROM sqlite_master WHERE name = 'pages_fts'")
+        ).scalar()
+    finally:
+        ggl_session.close()
+        documentation_session.close()
+
+    assert any(hit.title == "Scenario Routing Map" for hit in ggl_hits)
+    assert any(
+        hit.title == "How Humans and AI Share Responsibility in Locram"
+        for hit in documentation_hits
+    )
+    assert leftover_ggl is None
+    assert leftover_documentation is None

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from models.bases import RegistryEntry
 
@@ -24,3 +25,14 @@ class IBaseRegistryRepository(ABC):
 
     @abstractmethod
     def set_active(self, entry_id: str) -> None: ...
+
+
+class IManagedBaseRepository(ABC):
+    @abstractmethod
+    def stamp_schema_version(self, path: Path) -> None: ...
+
+    @abstractmethod
+    def install_pages_search_index(self, path: Path) -> None: ...
+
+    @abstractmethod
+    def read_base_id(self, path: Path) -> str | None: ...

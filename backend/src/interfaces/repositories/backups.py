@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from schemas.backups import BackupRecord
+from schemas.backups import BackupRecord, KnowledgeFileStats
 
 
 class IBackupRepository(ABC):
@@ -31,3 +31,6 @@ class IBackupRepository(ABC):
 
     @abstractmethod
     def read_base_id(self, snapshot_path: Path) -> str | None: ...
+
+    @abstractmethod
+    def read_stats(self, path: Path) -> KnowledgeFileStats: ...

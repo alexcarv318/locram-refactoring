@@ -10,7 +10,7 @@ from exceptions.backups import (
     InvalidBackupFilenameError,
 )
 from interfaces.repositories.backups import IBackupRepository
-from schemas.backups import BackupRecord
+from schemas.backups import BackupRecord, KnowledgeFileStats
 
 
 class BackupRepository(IBackupRepository):
@@ -106,6 +106,57 @@ class BackupRepository(IBackupRepository):
     def read_base_id(self, snapshot_path: Path) -> str | None:
         return self._read_metadata(snapshot_path)[0]
 
+    def read_stats(self, path: Path) -> KnowledgeFileStats:
+        size_bytes = path.stat().st_size if path.is_file() else 0
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+        try:
+            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            return KnowledgeFileStats(
+                page_count=BackupRepository._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status != 'to_delete'",
+                ),
+                active_page_count=BackupRepository._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active'",
+                ),
+                embedded_count=BackupRepository._optional_count(
+                    connection,
+                    "SELECT COUNT(DISTINCT page_id) FROM page_embeddings WHERE field = 'content'",
+                ),
+                link_count=BackupRepository._count(connection, "SELECT COUNT(*) FROM links"),
+                size_bytes=size_bytes,
+                orphan_count=BackupRepository._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages "
+                    "WHERE status = 'active' AND parent_id IS NULL "
+                    "AND id NOT IN (SELECT source_id FROM links) "
+                    "AND id NOT IN (SELECT target_id FROM links)",
+                ),
+                unembedded_count=BackupRepository._optional_count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
+                    "AND id NOT IN ("
+                    "SELECT page_id FROM page_embeddings WHERE field = 'content'"
+                    ")",
+                ),
+                due_for_review_count=BackupRepository._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
+                    "AND type != 'fleeting' AND datetime("
+                    "COALESCE(reviewed_at, updated_at), "
+                    "'+' || review_interval_days || ' days'"
+                    ") <= ?",
+                    (now,),
+                ),
+            )
+        except sqlite3.Error:
+            return KnowledgeFileStats(size_bytes=size_bytes)
+        finally:
+            connection.close()
+
     def _to_record(self, path: Path) -> BackupRecord:
         trigger, created_at = self._parse_stem(path.stem)
         base_id, source_base_id, display_name, page_count, active_page_count, link_count = (
@@ -195,9 +246,13 @@ class BackupRepository(IBackupRepository):
         return first_text, second_text
 
     @staticmethod
-    def _scalar_count(connection: sqlite3.Connection, statement: str) -> int | None:
+    def _scalar_count(
+        connection: sqlite3.Connection,
+        statement: str,
+        parameters: tuple[str, ...] = (),
+    ) -> int | None:
         try:
-            row = connection.execute(statement).fetchone()
+            row = connection.execute(statement, parameters).fetchone()
         except sqlite3.Error:
             return None
 
@@ -205,3 +260,27 @@ class BackupRepository(IBackupRepository):
             return None
 
         return int(row[0])
+
+    @staticmethod
+    def _count(
+        connection: sqlite3.Connection,
+        statement: str,
+        parameters: tuple[str, ...] = (),
+    ) -> int:
+        row = connection.execute(statement, parameters).fetchone()
+
+        if row is None or row[0] is None:
+            return 0
+
+        return int(row[0])
+
+    @staticmethod
+    def _optional_count(
+        connection: sqlite3.Connection,
+        statement: str,
+        parameters: tuple[str, ...] = (),
+    ) -> int | None:
+        try:
+            return BackupRepository._count(connection, statement, parameters)
+        except sqlite3.Error:
+            return None
