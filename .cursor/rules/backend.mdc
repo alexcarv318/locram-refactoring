@@ -54,7 +54,7 @@ pages_service = (
 
 ## Dependency tree
 
-- `dependencies.py` has getters only: `get_engine`, `get_session`, `get_db`, `get_<feature>_repository`, `get_<feature>_service`.
+- `dependencies.py` has getters only. Every function is named `get_<dependency>` (`get_engine`, `get_session`, `get_db`, `get_<feature>_repository`, `get_<feature>_service`). If a helper cannot be named that way, it does not belong in `dependencies.py`.
 - Engine and session factory live in `database.py`.
 - `get_db` yields one sync `Session` per request. Repositories take that session.
 - FastAPI uses `Depends(get_db)`. MCP has no request scope, so a tool-module `get_<feature>_service()` opens `get_session()` and reuses the same repository getters.
@@ -218,6 +218,6 @@ ruff check . --fix
 - Backups are SQLite snapshot files next to the knowledge file (`<db-parent>/backups/locram-<trigger>-<timestamp>.db`). No SQL model. Restore writes `pre_restore` first.
 - Exports are scoped SQLite artifacts next to the knowledge file (`<db-parent>/exports/locram-export-<timestamp>.db`). No SQL model. Inspect any locram SQLite path.
 - Merges are additive. Plan first. Same-id same-content is skipped; same-id different content is blocked. Execute writes a pre_merge backup first. No operation-log or provenance tables.
-- Sharing stores local owner grants on host-state. Invite minting signs with Access credentials. Accepted shares persist locally and appear as `shared:` working bases. `managed:ggl` and `managed:documentation` are built-in snapshot bases. Refresh copies packaged seeds into `managed-bases/`.
+- Sharing stores local owner grants on host-state. Invite minting signs with Access credentials. Accepted shares persist locally and appear as `shared:` working bases. Recipient page/link reads go through `IShareSession`. Owner session also serves `get_page_graph`. `managed:ggl` and `managed:documentation` are built-in snapshot bases. Refresh copies packaged seeds into `managed-bases/`.
 - Access is the device client for the existing Cloudflare broker (`https://broker.locram.app`). Enrollment, identity, in-process websocket relay, pending authorizations, connected sessions, and share-session resolve live here. Public status is `preferences/access.json`; secrets are a sibling file and never appear in API responses. Hosted embeddings use the enrolled relay token. Invite minting and `shared:` / `managed:` working bases use the same enrollment.
 - Do not start the next feature unless asked.

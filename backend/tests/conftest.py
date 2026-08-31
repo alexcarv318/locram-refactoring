@@ -38,6 +38,12 @@ from dependencies import (
     get_smart_folder_service,
 )
 from interfaces.services.access import IAccessRelay
+from interfaces.services.embeddings import IEmbeddingService
+from interfaces.services.exports import IExportService
+from interfaces.services.links import ILinkService
+from interfaces.services.merges import IMergeService
+from interfaces.services.pages import IPageService
+from interfaces.services.smart_folders import ISmartFolderService
 from models.bases import BaseMetadata
 from repositories.access import AccessRepository
 from repositories.backups import BackupRepository
@@ -148,6 +154,7 @@ class ScriptedAccessHttp:
         url: str,
         *,
         json: dict[str, str] | None = None,
+        content: bytes | None = None,
         headers: dict[str, str] | None = None,
         params: dict[str, str] | None = None,
         timeout: float | None = None,
@@ -491,7 +498,15 @@ def live_client() -> Iterator[TestClient]:
 @pytest.fixture
 def mcp_page_service(page_service: PageService) -> Iterator[PageService]:
     previous = mcp_pages.get_page_service
-    mcp_pages.get_page_service = lambda base_ref=None, write=False: page_service
+
+    def override(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> IPageService:
+        return page_service
+
+    mcp_pages.get_page_service = override
 
     yield page_service
 
@@ -506,9 +521,24 @@ def mcp_services(
     previous_page = mcp_pages.get_page_service
     previous_link = mcp_links.get_link_service
     previous_link_pages = mcp_links.get_page_service
-    mcp_pages.get_page_service = lambda base_ref=None, write=False: page_service
-    mcp_links.get_link_service = lambda base_ref=None, write=False: link_service
-    mcp_links.get_page_service = lambda base_ref=None, write=False: page_service
+
+    def override_pages(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> IPageService:
+        return page_service
+
+    def override_links(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> ILinkService:
+        return link_service
+
+    mcp_pages.get_page_service = override_pages
+    mcp_links.get_link_service = override_links
+    mcp_links.get_page_service = override_pages
 
     yield page_service, link_service
 
@@ -546,9 +576,15 @@ def mcp_smart_folder_service(
     smart_folder_service: SmartFolderService,
 ) -> Iterator[SmartFolderService]:
     previous = mcp_smart_folders.get_smart_folder_service
-    mcp_smart_folders.get_smart_folder_service = lambda base_ref=None, write=False: (
-        smart_folder_service
-    )
+
+    def override(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> ISmartFolderService:
+        return smart_folder_service
+
+    mcp_smart_folders.get_smart_folder_service = override
 
     yield smart_folder_service
 
@@ -560,7 +596,15 @@ def mcp_embedding_service(
     embedding_service: EmbeddingService,
 ) -> Iterator[EmbeddingService]:
     previous = mcp_embeddings.get_embedding_service
-    mcp_embeddings.get_embedding_service = lambda base_ref=None, write=False: embedding_service
+
+    def override(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> IEmbeddingService:
+        return embedding_service
+
+    mcp_embeddings.get_embedding_service = override
 
     yield embedding_service
 
@@ -580,7 +624,15 @@ def mcp_backup_service(backup_service: BackupService) -> Iterator[BackupService]
 @pytest.fixture
 def mcp_export_service(export_service: ExportService) -> Iterator[ExportService]:
     previous = mcp_exports.get_export_service
-    mcp_exports.get_export_service = lambda base_ref=None, write=False: export_service
+
+    def override(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> IExportService:
+        return export_service
+
+    mcp_exports.get_export_service = override
 
     yield export_service
 
@@ -593,7 +645,15 @@ def mcp_merge_service(
 ) -> Iterator[MergeService]:
     merge_service, _export_service, _page_service = merge_bundle
     previous = mcp_merges.get_merge_service
-    mcp_merges.get_merge_service = lambda base_ref=None, write=False: merge_service
+
+    def override(
+        base_ref: str | None = None,
+        write: bool = False,
+        recipient_actor_ref: str | None = None,
+    ) -> IMergeService:
+        return merge_service
+
+    mcp_merges.get_merge_service = override
 
     yield merge_service
 

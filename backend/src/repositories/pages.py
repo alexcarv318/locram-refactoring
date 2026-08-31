@@ -4,9 +4,12 @@ from hashlib import md5
 from sqlalchemy import func, select, text
 
 from database import BaseRepository
+from exceptions.sharing import SharedBaseOperationError
 from interfaces.repositories.pages import IPageRepository
+from interfaces.repositories.sharing import IShareSession
 from models.pages import Page
 from schemas.pages import PageSearchHit, PageStatus, PageSummary, PageType
+from schemas.sharing import RemotePageDetail, RemotePageListItem, RemoteSearchHit
 
 
 class PageRepository(BaseRepository, IPageRepository):
@@ -196,4 +199,139 @@ class PageRepository(BaseRepository, IPageRepository):
 
         return len(children) + sum(
             self._active_descendant_count(child_id) for child_id in children
+        )
+
+
+class RemotePageRepository(IPageRepository):
+    def __init__(self, session: IShareSession) -> None:
+        self._session = session
+
+    def get(self, page_id: str) -> Page | None:
+        item = self._session.get_page(page_id)
+
+        if item is None:
+            return None
+
+        return self._page_from_detail(item)
+
+    def create(self, page: Page) -> Page:
+        raise SharedBaseOperationError()
+
+    def save(self, page: Page) -> Page:
+        return self._page_from_detail(
+            self._session.update_page(page.id, page.title, page.content)
+        )
+
+    def soft_delete(self, page_id: str) -> bool:
+        raise SharedBaseOperationError()
+
+    def restore(self, page_id: str) -> bool:
+        raise SharedBaseOperationError()
+
+    def purge(self, page_id: str) -> bool:
+        raise SharedBaseOperationError()
+
+    def mark_reviewed(self, page_id: str, reviewed_at: str) -> Page | None:
+        raise SharedBaseOperationError()
+
+    def list_pages(
+        self,
+        status: PageStatus,
+        parent_id: str | None,
+        roots_only: bool,
+        limit: int,
+        offset: int,
+    ) -> list[PageSummary]:
+        del status
+        remote_parent_id = "root"
+
+        if not roots_only and parent_id is not None:
+            remote_parent_id = parent_id
+
+        return [
+            self._summary_from_item(item)
+            for item in self._session.list_pages(remote_parent_id, limit, offset)
+        ]
+
+    def search(self, query: str, limit: int) -> list[PageSearchHit]:
+        return [
+            self._search_hit_from_item(item) for item in self._session.search_pages(query, limit)
+        ]
+
+    def list_children(self, parent_id: str) -> list[Page]:
+        summaries = self.list_pages(
+            status=PageStatus.ACTIVE,
+            parent_id=parent_id,
+            roots_only=False,
+            limit=10_000,
+            offset=0,
+        )
+
+        return [self._page_from_summary(summary) for summary in summaries]
+
+    def list_visible_pages(self) -> list[PageSummary]:
+        raise SharedBaseOperationError()
+
+    @staticmethod
+    def _page_from_detail(item: RemotePageDetail) -> Page:
+        return Page(
+            id=item.id,
+            title=item.title,
+            content=item.content,
+            type=PageType(item.type),
+            status=PageStatus(item.status),
+            subject=item.subject,
+            tags=item.tags,
+            parent_id=item.parent_id,
+            content_hash=item.content_hash,
+            review_interval_days=item.review_interval_days,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            reviewed_at=item.reviewed_at,
+        )
+
+    @staticmethod
+    def _page_from_summary(item: PageSummary) -> Page:
+        return Page(
+            id=item.id,
+            title=item.title,
+            content="",
+            type=item.type,
+            status=item.status,
+            subject=item.subject,
+            tags=item.tags,
+            parent_id=item.parent_id,
+            review_interval_days=item.review_interval_days,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            reviewed_at=item.reviewed_at,
+        )
+
+    @staticmethod
+    def _summary_from_item(item: RemotePageListItem) -> PageSummary:
+        return PageSummary(
+            id=item.id,
+            title=item.title,
+            type=PageType(item.type),
+            status=PageStatus(item.status),
+            subject=item.subject,
+            tags=item.tags,
+            parent_id=item.parent_id,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            reviewed_at=item.reviewed_at,
+            review_interval_days=item.review_interval_days,
+            child_count=item.child_count,
+            active_descendant_count=item.active_descendant_count,
+        )
+
+    @staticmethod
+    def _search_hit_from_item(item: RemoteSearchHit) -> PageSearchHit:
+        return PageSearchHit(
+            id=item.id,
+            title=item.title,
+            type=PageType(item.type),
+            status=PageStatus(item.status),
+            snippet=item.snippet,
+            rank=item.rank,
         )

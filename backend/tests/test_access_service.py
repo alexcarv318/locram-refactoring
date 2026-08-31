@@ -148,6 +148,7 @@ class UnreachableAccessHttp:
         url: str,
         *,
         json: dict[str, str] | None = None,
+        content: bytes | None = None,
         headers: dict[str, str] | None = None,
         params: dict[str, str] | None = None,
         timeout: float | None = None,

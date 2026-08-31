@@ -233,7 +233,9 @@ class EmbeddingService(IEmbeddingService):
         self._access_repository = access_repository
         self._fixed_provider = embedding_provider
         self._settings_path = settings_path or database.embedding_settings_path
-        self._huggingface_api_key_path = huggingface_api_key_path or database.huggingface_api_key_path
+        self._huggingface_api_key_path = (
+            huggingface_api_key_path or database.huggingface_api_key_path
+        )
         self._bootstrap_path = bootstrap_path or database.hosted_embedding_bootstrap_path
 
     def store_embedding(

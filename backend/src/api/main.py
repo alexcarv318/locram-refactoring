@@ -34,10 +34,12 @@ app.include_router(exports_router)
 app.include_router(merges_router)
 app.include_router(sharing_router)
 app.include_router(access_router)
+app.include_router(access_router, prefix="/mcp")
 app.include_router(presets_router)
 app.include_router(notes_router)
 app.include_router(embeddings_router)
 app.include_router(desktop_embeddings_router)
+
 
 @app.exception_handler(AppError)
 async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
@@ -45,6 +47,7 @@ async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
         status_code=error.status_code,
         content={"detail": str(error)},
     )
+
 
 def mount_mcp_http(application: FastAPI) -> None:
     mcp_http_app = mcp_server.streamable_http_app()
@@ -57,6 +60,7 @@ def mount_mcp_http(application: FastAPI) -> None:
 
     application.router.lifespan_context = lifespan
     application.mount("/", mcp_http_app)
+
 
 def main() -> None:
     mount_mcp_http(app)

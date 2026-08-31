@@ -19,7 +19,7 @@ from interfaces.repositories.exports import IExportRepository
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.merges import IMergeRepository
 from interfaces.repositories.pages import IPageRepository
-from interfaces.repositories.sharing import ISharingRepository
+from interfaces.repositories.sharing import IShareSession, ISharingRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
 from interfaces.services.access import AccessHttpClient, IAccessRelay, IAccessService
 from interfaces.services.attachments import IAttachmentService
@@ -40,10 +40,10 @@ from repositories.bases import BaseRegistryRepository
 from repositories.changes import ChangeRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
-from repositories.links import LinkRepository
+from repositories.links import LinkRepository, RemoteLinkRepository
 from repositories.merges import MergeRepository
-from repositories.pages import PageRepository
-from repositories.sharing import SharingRepository
+from repositories.pages import PageRepository, RemotePageRepository
+from repositories.sharing import ShareSession, SharingRepository
 from repositories.smart_folders import SmartFolderRepository
 from schemas.access import AccessSettings
 from schemas.bases import WorkingBaseRecord
@@ -111,7 +111,7 @@ def get_access_relay() -> IAccessRelay:
 
 
 @lru_cache
-def get_access_http_client() -> AccessHttpClient:
+def get_access_http_client() -> httpx.Client:
     return httpx.Client()
 
 
@@ -195,12 +195,56 @@ def get_db(base_ref: str | None = Query(default=None)) -> Iterator[Session]:
         session.close()
 
 
-def get_page_repository(db: Session = Depends(get_db)) -> IPageRepository:
-    return PageRepository(db)
+def get_share_session(
+    base_ref: str | None = Query(default=None),
+    recipient_actor_ref: str | None = Query(default=None),
+) -> IShareSession | None:
+    working_base = get_working_base(base_ref=base_ref, write=False)
+
+    if working_base.kind != "shared":
+        return None
+
+    share = get_access_repository().get_accepted_share(working_base.entry_id)
+
+    if share is None:
+        raise WorkingBaseNotFoundError(working_base.base_ref)
+
+    actor_ref = (recipient_actor_ref or "").strip()
+
+    if actor_ref == "":
+        actor_ref = share.recipient_actor_ref
+
+    return ShareSession(share, actor_ref, get_access_http_client())
 
 
-def get_link_repository(db: Session = Depends(get_db)) -> ILinkRepository:
-    return LinkRepository(db)
+def get_page_repository(
+    base_ref: str | None = Query(default=None),
+    recipient_actor_ref: str | None = Query(default=None),
+) -> IPageRepository:
+    session = get_share_session(
+        base_ref=base_ref,
+        recipient_actor_ref=recipient_actor_ref,
+    )
+
+    if session is not None:
+        return RemotePageRepository(session)
+
+    return PageRepository(get_session(base_ref=base_ref, write=False))
+
+
+def get_link_repository(
+    base_ref: str | None = Query(default=None),
+    recipient_actor_ref: str | None = Query(default=None),
+) -> ILinkRepository:
+    session = get_share_session(
+        base_ref=base_ref,
+        recipient_actor_ref=recipient_actor_ref,
+    )
+
+    if session is not None:
+        return RemoteLinkRepository(session)
+
+    return LinkRepository(get_session(base_ref=base_ref, write=False))
 
 
 def get_change_repository(db: Session = Depends(get_db)) -> IChangeRepository:

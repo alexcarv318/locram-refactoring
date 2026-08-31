@@ -11,3 +11,10 @@ wheels/
 
 # Local SQLite
 locram.db
+
+.idea/
+.vscode/
+.junie/
+
+.mypy_cache/
+.ruff_cache/

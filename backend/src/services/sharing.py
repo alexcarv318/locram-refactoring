@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 from ulid import ULID
 
+from database import open_knowledge_session
+from exceptions.pages import PageNotFoundError
 from exceptions.sharing import (
+    SharedBaseSessionError,
     ShareGrantNotFoundError,
     SharingError,
     SharingNotReadyError,
@@ -14,18 +18,26 @@ from interfaces.services.access import IAccessService
 from interfaces.services.sharing import ISharingService
 from models.bases import RegistryEntry
 from models.sharing import BaseShareGrant
+from repositories.links import LinkRepository
+from repositories.pages import PageRepository
 from schemas.access import AcceptedShareRecord, InviteMintRequest
+from schemas.pages import PageSearchHit, PageStatus, PageUpdate
 from schemas.sharing import (
+    BaseShareSessionRequest,
+    BaseShareSessionResult,
     OwnerShareManagementItem,
     RecipientBackupResult,
     RecipientShareViewItem,
     ShareActivationState,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
+    ShareGrantPermission,
     ShareGrantRecord,
     ShareGrantState,
     ShareInvite,
 )
+from services.links import LinkService
+from services.pages import PageService
 
 
 class SharingService(ISharingService):
@@ -225,6 +237,212 @@ class SharingService(ISharingService):
         raise SharingNotReadyError(
             "Recipient backup needs a local shared-base file"
         )
+
+    def run_session(self, payload: BaseShareSessionRequest) -> BaseShareSessionResult:
+        grant_id = payload.transport_envelope.base_share_grant_id.strip()
+        recipient_actor_ref = payload.recipient_actor_ref.strip()
+        operation = payload.operation.strip()
+
+        if grant_id == "" or recipient_actor_ref == "" or operation == "":
+            raise SharedBaseSessionError(
+                "invalid_request",
+                "operation, base_share_grant_id, and recipient_actor_ref are required",
+                400,
+            )
+
+        grant = self._sharing_repository.get(grant_id)
+
+        if grant is None:
+            raise SharedBaseSessionError(
+                "not_found",
+                f"Base share grant {grant_id} not found",
+                404,
+            )
+
+        if grant.recipient_actor_ref != recipient_actor_ref:
+            raise SharedBaseSessionError(
+                "working_base_forbidden",
+                "Remote shared base access was denied.",
+                403,
+            )
+
+        if grant.revoked_at is not None:
+            raise SharedBaseSessionError(
+                "working_base_forbidden",
+                "Remote shared base access was denied.",
+                403,
+            )
+
+        if self._grant_state(grant, None) is ShareGrantState.EXPIRED:
+            raise SharedBaseSessionError(
+                "working_base_forbidden",
+                "Remote shared base access was denied.",
+                403,
+            )
+
+        required = (payload.required_permission or "").strip().lower()
+
+        if (
+            operation == "update_page" or required == ShareGrantPermission.WRITE.value
+        ) and grant.permission is ShareGrantPermission.READ:
+            raise SharedBaseSessionError(
+                "working_base_forbidden",
+                "Remote shared base access was denied.",
+                403,
+            )
+
+        if operation == "validate":
+            entry = self._registry_entry_for_grant(grant)
+            title = entry.display_name if entry is not None else grant.base_id
+
+            return BaseShareSessionResult(
+                session_state="ready",
+                share_base_title=title,
+                owner_display_name=grant.owner_actor_ref,
+                permission=grant.permission.value,
+            )
+
+        if operation == "activate":
+            if grant.activated_at is None:
+                grant.activated_at = payload.activated_at or self._now()
+                grant = self._sharing_repository.save(grant)
+
+            return BaseShareSessionResult(
+                session_state="ready",
+                activated_at=grant.activated_at,
+            )
+
+        entry = self._registry_entry_for_grant(grant)
+
+        if entry is None or entry.path == "":
+            raise SharedBaseSessionError(
+                "unavailable",
+                "Shared base unavailable in current runtime.",
+                409,
+            )
+
+        session = open_knowledge_session(Path(entry.path))
+
+        try:
+            page_repository = PageRepository(session)
+            link_repository = LinkRepository(session)
+            pages = PageService(page_repository, link_repository)
+            links = LinkService(link_repository, page_repository)
+
+            return self._run_page_operation(pages, links, payload, operation)
+        finally:
+            session.close()
+
+    def _run_page_operation(
+        self,
+        pages: PageService,
+        links: LinkService,
+        payload: BaseShareSessionRequest,
+        operation: str,
+    ) -> BaseShareSessionResult:
+        if operation == "list_pages":
+            parent_id = payload.parent_id or "root"
+            roots_only = parent_id == "root"
+            items = pages.list_pages(
+                status=PageStatus.ACTIVE,
+                parent_id=None if roots_only else parent_id,
+                roots_only=roots_only,
+                limit=payload.limit or 10_000,
+                offset=payload.offset or 0,
+            )
+
+            return BaseShareSessionResult(session_state="ready", items=items)
+
+        if operation == "get_page":
+            page_id = (payload.page_id or "").strip()
+
+            if page_id == "":
+                raise SharedBaseSessionError("invalid_request", "page_id is required", 400)
+
+            try:
+                item = pages.get_page(page_id)
+            except PageNotFoundError as error:
+                raise SharedBaseSessionError(
+                    "not_found",
+                    f"Page {page_id} not found",
+                    404,
+                ) from error
+
+            if item.status is PageStatus.TO_DELETE:
+                raise SharedBaseSessionError("not_found", f"Page {page_id} not found", 404)
+
+            return BaseShareSessionResult(session_state="ready", item=item)
+
+        if operation == "get_page_graph":
+            page_id = (payload.page_id or "").strip()
+
+            if page_id == "":
+                raise SharedBaseSessionError("invalid_request", "page_id is required", 400)
+
+            try:
+                item = pages.get_page(page_id)
+                graph = links.get_page_graph(page_id, payload.expand_hops or 1)
+            except PageNotFoundError as error:
+                raise SharedBaseSessionError(
+                    "not_found",
+                    f"Page {page_id} not found",
+                    404,
+                ) from error
+
+            if item.status is PageStatus.TO_DELETE:
+                raise SharedBaseSessionError("not_found", f"Page {page_id} not found", 404)
+
+            return BaseShareSessionResult(session_state="ready", item=graph)
+
+        if operation == "search_pages":
+            query = (payload.query or "").strip()
+            hits: list[PageSearchHit] = []
+
+            if query != "":
+                hits = pages.search_pages(query, payload.limit or 20)
+
+            return BaseShareSessionResult(session_state="ready", items=hits)
+
+        if operation == "update_page":
+            page_id = (payload.page_id or "").strip()
+            fields = payload.fields
+
+            if page_id == "" or fields is None:
+                raise SharedBaseSessionError(
+                    "invalid_request",
+                    "page_id and fields are required",
+                    400,
+                )
+
+            if fields.title is not None and fields.title.strip() == "":
+                raise SharedBaseSessionError(
+                    "invalid_request",
+                    "Field 'title' cannot be blank",
+                    400,
+                )
+
+            if fields.title is None and fields.content is None:
+                raise SharedBaseSessionError(
+                    "invalid_request",
+                    "No editable fields provided",
+                    400,
+                )
+
+            try:
+                item = pages.update_page(
+                    page_id,
+                    PageUpdate(title=fields.title, content=fields.content),
+                )
+            except PageNotFoundError as error:
+                raise SharedBaseSessionError(
+                    "not_found",
+                    f"Page {page_id} not found",
+                    404,
+                ) from error
+
+            return BaseShareSessionResult(session_state="ready", item=item)
+
+        raise SharedBaseSessionError("unsupported_operation", "unsupported_operation", 400)
 
     def _accepted_share(self, grant_id: str) -> AcceptedShareRecord:
         share = self._access_service.get_accepted_share(grant_id)

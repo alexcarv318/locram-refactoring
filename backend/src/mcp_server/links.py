@@ -1,4 +1,4 @@
-from dependencies import get_link_repository, get_page_repository, get_session
+from dependencies import get_link_repository, get_page_repository, get_working_base
 from dependencies import get_link_service as load_link_service
 from dependencies import get_page_service as load_page_service
 from interfaces.services.links import ILinkService
@@ -15,14 +15,32 @@ from schemas.links import (
 from .protocol import MCPServerApp
 
 
-def get_link_service(base_ref: str | None = None, write: bool = False) -> ILinkService:
-    db = get_session(base_ref, write)
-    return load_link_service(get_link_repository(db), get_page_repository(db))
+def get_link_service(
+    base_ref: str | None = None,
+    write: bool = False,
+    recipient_actor_ref: str | None = None,
+) -> ILinkService:
+    if write:
+        get_working_base(base_ref, True)
+
+    return load_link_service(
+        get_link_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+        get_page_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+    )
 
 
-def get_page_service(base_ref: str | None = None, write: bool = False) -> IPageService:
-    db = get_session(base_ref, write)
-    return load_page_service(get_page_repository(db), get_link_repository(db))
+def get_page_service(
+    base_ref: str | None = None,
+    write: bool = False,
+    recipient_actor_ref: str | None = None,
+) -> IPageService:
+    if write:
+        get_working_base(base_ref, True)
+
+    return load_page_service(
+        get_page_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+        get_link_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+    )
 
 
 def link_pages(
@@ -30,8 +48,13 @@ def link_pages(
     target_id: str,
     link_type: LinkType = LinkType.RELATED,
     base_ref: str | None = None,
+    recipient_actor_ref: str | None = None,
 ) -> LinkedPagesResponse:
-    return get_link_service(base_ref, write=True).link_pages(source_id, target_id, link_type)
+    return get_link_service(
+        base_ref,
+        write=True,
+        recipient_actor_ref=recipient_actor_ref,
+    ).link_pages(source_id, target_id, link_type)
 
 
 def unlink_pages(
@@ -39,20 +62,38 @@ def unlink_pages(
     target_id: str,
     link_type: LinkType | None = None,
     base_ref: str | None = None,
+    recipient_actor_ref: str | None = None,
 ) -> UnlinkedPagesResponse:
-    return get_link_service(base_ref, write=True).unlink_pages(source_id, target_id, link_type)
+    return get_link_service(
+        base_ref,
+        write=True,
+        recipient_actor_ref=recipient_actor_ref,
+    ).unlink_pages(source_id, target_id, link_type)
 
 
-def batch_link(links: list[LinkCreate], base_ref: str | None = None) -> BatchLinkResult:
-    return get_link_service(base_ref, write=True).batch_link(links)
+def batch_link(
+    links: list[LinkCreate],
+    base_ref: str | None = None,
+    recipient_actor_ref: str | None = None,
+) -> BatchLinkResult:
+    return get_link_service(
+        base_ref,
+        write=True,
+        recipient_actor_ref=recipient_actor_ref,
+    ).batch_link(links)
 
 
 def set_parent(
     child_id: str,
     parent_id: str | None,
     base_ref: str | None = None,
+    recipient_actor_ref: str | None = None,
 ) -> ParentSetResponse:
-    return get_page_service(base_ref, write=True).set_parent(child_id, parent_id)
+    return get_page_service(
+        base_ref,
+        write=True,
+        recipient_actor_ref=recipient_actor_ref,
+    ).set_parent(child_id, parent_id)
 
 
 def register(mcp: MCPServerApp) -> None:

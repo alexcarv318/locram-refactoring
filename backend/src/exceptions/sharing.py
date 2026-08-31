@@ -26,3 +26,34 @@ class SharingNotReadyError(SharingError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class SharedBaseOperationError(SharingError):
+    status_code = 403
+
+    def __init__(
+        self,
+        message: str = "This operation is not available on a shared base",
+    ) -> None:
+        super().__init__(message)
+
+
+class ShareReacceptRequiredError(SharingError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("Share must be accepted again before it can be used")
+
+
+class SharedBaseRequestError(SharingError):
+    status_code = 502
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class SharedBaseSessionError(SharingError):
+    def __init__(self, error_code: str, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.status_code = status_code

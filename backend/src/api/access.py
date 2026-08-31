@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
-from dependencies import get_access_service
+from dependencies import get_access_service, get_sharing_service
+from exceptions.sharing import SharedBaseSessionError
 from interfaces.services.access import IAccessService
+from interfaces.services.sharing import ISharingService
 from schemas.access import (
     AccessEnrollRequest,
     AccessIdentityResponse,
@@ -14,6 +17,7 @@ from schemas.access import (
     PendingAuthorizationListResponse,
     ResolvedShareSessionResponse,
 )
+from schemas.sharing import BaseShareSessionErrorBody, BaseShareSessionRequest
 
 access_router = APIRouter(prefix="/api/access")
 
@@ -114,3 +118,23 @@ def resolve_share_session(
     access_service: IAccessService = Depends(get_access_service),
 ) -> ResolvedShareSessionResponse:
     return ResolvedShareSessionResponse(item=access_service.resolve_share_session(payload))
+
+
+@access_router.post("/base-share-grants/session")
+def owner_share_session(
+    payload: BaseShareSessionRequest,
+    sharing_service: ISharingService = Depends(get_sharing_service),
+) -> JSONResponse:
+    try:
+        result = sharing_service.run_session(payload)
+    except SharedBaseSessionError as error:
+        return JSONResponse(
+            status_code=error.status_code,
+            content=BaseShareSessionErrorBody(
+                error=error.error_code,
+                session_state="unavailable",
+                reason=str(error),
+            ).model_dump(),
+        )
+
+    return JSONResponse(content=result.model_dump(exclude_none=True, mode="json"))

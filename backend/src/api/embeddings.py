@@ -1,12 +1,6 @@
 from fastapi import APIRouter, Body, Depends, Query
 
-from dependencies import (
-    get_embedding_repository,
-    get_embedding_service,
-    get_page_repository,
-    get_session,
-    get_writable_working_base,
-)
+from dependencies import get_embedding_service, get_writable_working_base
 from interfaces.services.embeddings import IEmbeddingService
 from schemas.bases import WorkingBaseRecord
 from schemas.embeddings import (
@@ -92,17 +86,12 @@ def bootstrap_embedding_settings(
 
 
 @desktop_embeddings_router.post("/embeddings/run", response_model=EmbedRunResponse)
-def run_desktop_embed(payload: DesktopEmbedRunRequest) -> EmbedRunResponse:
-    session = get_session(base_ref=payload.base_ref, write=True)
+def run_desktop_embed(
+    payload: DesktopEmbedRunRequest,
+    embedding_service: IEmbeddingService = Depends(get_embedding_service),
+) -> EmbedRunResponse:
+    result = embedding_service.run_embed(payload.force, payload.limit)
+    result.requested_base_id = payload.base_id
+    result.requested_base_ref = payload.base_ref
 
-    try:
-        embedding_service = get_embedding_service(
-            embedding_repository=get_embedding_repository(db=session),
-            page_repository=get_page_repository(db=session),
-        )
-        result = embedding_service.run_embed(payload.force, payload.limit)
-        result.requested_base_id = payload.base_id
-        result.requested_base_ref = payload.base_ref
-        return EmbedRunResponse(item=result)
-    finally:
-        session.close()
+    return EmbedRunResponse(item=result)

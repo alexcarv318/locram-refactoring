@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 
 from schemas.sharing import (
+    BaseShareSessionRequest,
+    BaseShareSessionResult,
     OwnerShareManagementItem,
     RecipientBackupResult,
     RecipientShareViewItem,
@@ -14,8 +16,10 @@ from schemas.sharing import (
 class ISharingService(ABC):
     """Sharing: owner grants, signed invites, and accepted recipient shares.
 
-    Owner grants live on host-state. Invite minting and recipient sessions use
-    Access credentials. Accepted shares appear as shared working bases.
+    Owner grants live on host-state. Invite minting uses Access credentials.
+    Accepted shares appear as shared working bases. The recipient talks to the
+    owner through IShareSession. The owner session runs list/get/search/update
+    and get_page_graph against the granted local base.
     """
 
     @abstractmethod
@@ -68,3 +72,6 @@ class ISharingService(ABC):
 
     @abstractmethod
     def backup_recipient(self, grant_id: str, trigger: str) -> RecipientBackupResult: ...
+
+    @abstractmethod
+    def run_session(self, payload: BaseShareSessionRequest) -> BaseShareSessionResult: ...

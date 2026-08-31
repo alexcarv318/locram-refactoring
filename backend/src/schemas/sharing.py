@@ -1,6 +1,9 @@
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from schemas.links import PageGraph
+from schemas.pages import PageDetail, PageSearchHit, PageSummary
 
 
 class ShareGrantPermission(StrEnum):
@@ -152,3 +155,119 @@ class RecipientShareViewResponse(BaseModel):
 
 class RecipientBackupResponse(BaseModel):
     item: RecipientBackupResult
+
+
+class BaseSharePageFields(BaseModel):
+    title: str | None = None
+    content: str | None = None
+
+
+class BaseShareSessionRequest(BaseModel):
+    invite_url: str | None = None
+    transport_envelope: ShareTransportEnvelope
+    operation: str
+    recipient_actor_ref: str
+    required_permission: str | None = None
+    parent_id: str | None = None
+    limit: int | None = None
+    offset: int | None = None
+    page_id: str | None = None
+    expand_hops: int | None = None
+    query: str | None = None
+    fields: BaseSharePageFields | None = None
+    activated_at: str | None = None
+
+
+class RemotePageListItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str
+    type: str = "fleeting"
+    status: str = "active"
+    subject: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    reviewed_at: str | None = None
+    review_interval_days: int = 7
+    content: str = ""
+    content_hash: str | None = None
+    child_count: int = 0
+    active_descendant_count: int = 0
+
+
+class RemotePageConnection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str
+    link_type: str
+    direction: str
+
+
+class RemotePageDetail(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str
+    content: str = ""
+    type: str = "fleeting"
+    status: str = "active"
+    subject: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    content_hash: str | None = None
+    review_interval_days: int = 7
+    created_at: str = ""
+    updated_at: str = ""
+    reviewed_at: str | None = None
+    connected_to: list[RemotePageConnection] = Field(default_factory=list)
+
+
+class RemoteSearchHit(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str
+    type: str = "fleeting"
+    status: str = "active"
+    snippet: str = ""
+    rank: float | None = None
+
+
+class BaseShareSessionResult(BaseModel):
+    session_state: str
+    items: list[PageSummary] | list[PageSearchHit] | None = None
+    item: PageDetail | PageGraph | None = None
+    share_base_title: str | None = None
+    owner_display_name: str | None = None
+    permission: str | None = None
+    activated_at: str | None = None
+
+
+class BaseShareSessionErrorBody(BaseModel):
+    error: str
+    session_state: str
+    reason: str
+
+
+class BaseShareErrorPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    error: str | None = None
+    reason: str | None = None
+    session_state: str | None = None
+
+
+class BaseShareItemPayload(BaseShareErrorPayload):
+    item: RemotePageDetail | None = None
+
+
+class BaseShareListPayload(BaseShareErrorPayload):
+    items: list[RemotePageListItem] = Field(default_factory=list)
+
+
+class BaseShareSearchPayload(BaseShareErrorPayload):
+    items: list[RemoteSearchHit] = Field(default_factory=list)

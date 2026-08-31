@@ -2,8 +2,8 @@ from dependencies import (
     get_export_repository,
     get_link_repository,
     get_page_repository,
-    get_session,
     get_smart_folder_repository,
+    get_working_base,
 )
 from dependencies import get_link_service as load_link_service
 from dependencies import get_smart_folder_service as load_smart_folder_service
@@ -21,10 +21,22 @@ from services.exports import ExportService
 from .protocol import MCPServerApp
 
 
-def get_export_service(base_ref: str | None = None, write: bool = False) -> IExportService:
-    db = get_session(base_ref=base_ref, write=write)
-    page_repository = get_page_repository(db=db)
-    link_repository = get_link_repository(db=db)
+def get_export_service(
+    base_ref: str | None = None,
+    write: bool = False,
+    recipient_actor_ref: str | None = None,
+) -> IExportService:
+    if write:
+        get_working_base(base_ref, True)
+
+    page_repository = get_page_repository(
+        base_ref=base_ref,
+        recipient_actor_ref=recipient_actor_ref,
+    )
+    link_repository = get_link_repository(
+        base_ref=base_ref,
+        recipient_actor_ref=recipient_actor_ref,
+    )
 
     return ExportService(
         export_repository=get_export_repository(base_ref=base_ref, write=write),
@@ -69,8 +81,13 @@ def export_subgraph(
     include_all: bool = False,
     package_label: str | None = None,
     base_ref: str | None = None,
+    recipient_actor_ref: str | None = None,
 ) -> ExportResult:
-    return get_export_service(base_ref=base_ref, write=True).export_subgraph(
+    return get_export_service(
+        base_ref=base_ref,
+        write=True,
+        recipient_actor_ref=recipient_actor_ref,
+    ).export_subgraph(
         ExportScope(
             page_ids=page_ids or [],
             filter=filter_state,
