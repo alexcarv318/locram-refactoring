@@ -19,6 +19,8 @@ from schemas.sharing import (
     BaseSharePageFields,
     BaseShareSearchPayload,
     BaseShareSessionRequest,
+    BaseShareStats,
+    BaseShareStatsPayload,
     RemotePageDetail,
     RemotePageListItem,
     RemoteSearchHit,
@@ -128,6 +130,16 @@ class ShareSession(IShareSession):
 
         return item
 
+    def base_stats(self) -> BaseShareStats | None:
+        response = self._operation("base_stats")
+
+        if self._is_missing(response):
+            return None
+
+        self._raise_for_error(response)
+
+        return self._stats_payload(response).stats
+
     def _operation(
         self,
         operation: str,
@@ -198,6 +210,14 @@ class ShareSession(IShareSession):
     def _search_payload(self, response: httpx.Response) -> BaseShareSearchPayload:
         try:
             return BaseShareSearchPayload.model_validate_json(response.content)
+        except ValidationError as error:
+            raise SharedBaseRequestError(
+                "Brokered base-share gateway returned invalid payload"
+            ) from error
+
+    def _stats_payload(self, response: httpx.Response) -> BaseShareStatsPayload:
+        try:
+            return BaseShareStatsPayload.model_validate_json(response.content)
         except ValidationError as error:
             raise SharedBaseRequestError(
                 "Brokered base-share gateway returned invalid payload"

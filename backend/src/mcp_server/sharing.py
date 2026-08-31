@@ -33,6 +33,7 @@ def get_sharing_service() -> ISharingService:
             http_client=get_access_http_client(),
             settings=get_access_settings(),
         ),
+        http_client=get_access_http_client(),
     )
 
 

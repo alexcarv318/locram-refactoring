@@ -318,3 +318,28 @@ def test_owner_share_session_lists_and_reads_pages(
     assert graph.status_code == 200
     assert graph.json()["item"]["selected_page_id"] == page_id
     assert any(link["target"] == related_id for link in graph.json()["item"]["links"])
+
+    stats = live_client.post(
+        "/api/access/base-share-grants/session",
+        json={
+            "transport_envelope": _envelope(created.grant_id, created.base_id),
+            "operation": "base_stats",
+            "recipient_actor_ref": "account:alice",
+        },
+    )
+    by_title = live_client.post(
+        "/api/access/base-share-grants/session",
+        json={
+            "transport_envelope": _envelope(created.grant_id, created.base_id),
+            "operation": "get_page",
+            "recipient_actor_ref": "account:alice",
+            "page_id": "Alpha",
+        },
+    )
+
+    assert stats.status_code == 200
+    assert stats.json()["session_state"] == "ready"
+    assert stats.json()["stats"]["page_count"] >= 2
+    assert stats.json()["stats"]["link_count"] >= 1
+    assert by_title.status_code == 200
+    assert by_title.json()["item"]["id"] == page_id

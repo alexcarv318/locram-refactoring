@@ -18,8 +18,9 @@ class ISharingService(ABC):
 
     Owner grants live on host-state. Invite minting uses Access credentials.
     Accepted shares appear as shared working bases. The recipient talks to the
-    owner through IShareSession. The owner session runs list/get/search/update
-    and get_page_graph against the granted local base.
+    owner through IShareSession. The owner session runs list/get/search/update,
+    get_page_graph, and base_stats against the granted local base. Recipient
+    backup copies that local file, or snapshots the owner through IShareSession.
     """
 
     @abstractmethod

@@ -1,6 +1,7 @@
 import pytest
 
 from exceptions.pages import (
+    AmbiguousTitleError,
     HubParentError,
     PageNotDeletedError,
     PageNotFoundError,
@@ -428,3 +429,20 @@ def test_create_keeps_missing_parent_id(page_service: PageService) -> None:
 
     assert page.parent_id == "01MISSINGPARENT000000000000"
     assert page.parent is None
+
+
+def test_get_page_resolves_title(page_service: PageService) -> None:
+    created = page_service.create_page(PageCreate(title="Named Note", content="body"))
+
+    fetched = page_service.get_page("Named Note")
+
+    assert fetched.id == created.id
+    assert fetched.title == "Named Note"
+
+
+def test_get_page_rejects_ambiguous_title(page_service: PageService) -> None:
+    page_service.create_page(PageCreate(title="Shared Title", content="one"))
+    page_service.create_page(PageCreate(title="Shared Title", content="two"))
+
+    with pytest.raises(AmbiguousTitleError):
+        page_service.get_page("Shared Title")

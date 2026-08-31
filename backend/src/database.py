@@ -49,6 +49,7 @@ access_path = Path.home() / ".locram" / "preferences" / "access.json"
 access_credentials_path = Path.home() / ".locram" / "preferences" / "access-credentials.json"
 accepted_shares_path = Path.home() / ".locram" / "preferences" / "accepted-shares.json"
 managed_bases_path = Path.home() / ".locram" / "managed-bases"
+shared_mirrors_path = Path.home() / ".locram" / "shared-mirrors"
 managed_base_seeds_path = Path(__file__).resolve().parent.parent / "managed_base_seeds"
 
 if not managed_base_seeds_path.is_dir():

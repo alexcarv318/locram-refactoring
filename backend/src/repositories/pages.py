@@ -8,7 +8,7 @@ from exceptions.sharing import SharedBaseOperationError
 from interfaces.repositories.pages import IPageRepository
 from interfaces.repositories.sharing import IShareSession
 from models.pages import Page
-from schemas.pages import PageSearchHit, PageStatus, PageSummary, PageType
+from schemas.pages import PageSearchHit, PageStatus, PageSummary, PageTitleRef, PageType
 from schemas.sharing import RemotePageDetail, RemotePageListItem, RemoteSearchHit
 
 
@@ -163,6 +163,17 @@ class PageRepository(BaseRepository, IPageRepository):
 
         return [self._to_summary(page) for page in self.db.scalars(statement)]
 
+    def find_by_title(self, title: str) -> list[PageTitleRef]:
+        statement = (
+            select(Page)
+            .where(Page.title == title, Page.status != PageStatus.TO_DELETE)
+            .order_by(Page.created_at, Page.id)
+        )
+
+        return [
+            PageTitleRef(id=page.id, title=page.title) for page in self.db.scalars(statement)
+        ]
+
     def _to_summary(self, page: Page) -> PageSummary:
         child_count = self.db.scalar(
             select(func.count())
@@ -271,6 +282,16 @@ class RemotePageRepository(IPageRepository):
 
     def list_visible_pages(self) -> list[PageSummary]:
         raise SharedBaseOperationError()
+
+    def find_by_title(self, title: str) -> list[PageTitleRef]:
+        if title.strip() == "":
+            return []
+
+        hits = self._session.search_pages(title, 25)
+        exact = [hit for hit in hits if hit.title == title]
+        chosen = exact if exact else hits
+
+        return [PageTitleRef(id=hit.id, title=hit.title) for hit in chosen]
 
     @staticmethod
     def _page_from_detail(item: RemotePageDetail) -> Page:

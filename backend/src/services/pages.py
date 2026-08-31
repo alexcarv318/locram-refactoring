@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from ulid import ULID
 
 from exceptions.pages import (
+    AmbiguousTitleError,
     HubParentError,
     PageNotDeletedError,
     PageNotFoundError,
@@ -68,10 +69,22 @@ class PageService(IPageService):
     def get_page(self, page_id: str) -> PageDetail:
         page = self._page_repository.get(page_id)
 
-        if page is None:
-            raise PageNotFoundError(page_id)
+        if page is not None:
+            return self._to_detail(page)
 
-        return self._to_detail(page)
+        identifier = page_id.strip()
+        matches = self._page_repository.find_by_title(identifier)
+
+        if len(matches) > 1:
+            raise AmbiguousTitleError(identifier, len(matches))
+
+        if len(matches) == 1:
+            page = self._page_repository.get(matches[0].id)
+
+            if page is not None:
+                return self._to_detail(page)
+
+        raise PageNotFoundError(page_id)
 
     def update_page(self, page_id: str, payload: PageUpdate) -> PageDetail:
         page = self._page_repository.get(page_id)

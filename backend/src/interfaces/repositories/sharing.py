@@ -1,7 +1,12 @@
 from abc import ABC, abstractmethod
 
 from models.sharing import BaseShareGrant
-from schemas.sharing import RemotePageDetail, RemotePageListItem, RemoteSearchHit
+from schemas.sharing import (
+    BaseShareStats,
+    RemotePageDetail,
+    RemotePageListItem,
+    RemoteSearchHit,
+)
 
 
 class ISharingRepository(ABC):
@@ -35,3 +40,6 @@ class IShareSession(ABC):
 
     @abstractmethod
     def update_page(self, page_id: str, title: str, content: str) -> RemotePageDetail: ...
+
+    @abstractmethod
+    def base_stats(self) -> BaseShareStats | None: ...

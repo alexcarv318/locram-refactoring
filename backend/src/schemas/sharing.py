@@ -78,6 +78,17 @@ class ShareInvite(BaseModel):
     share_invite_url: str
 
 
+class BaseShareStats(BaseModel):
+    page_count: int | None = None
+    active_page_count: int | None = None
+    embedded_count: int | None = None
+    link_count: int | None = None
+    size_bytes: int | None = None
+    orphan_count: int | None = None
+    unembedded_count: int | None = None
+    due_for_review_count: int | None = None
+
+
 class OwnerShareManagementItem(ShareGrantRecord):
     recipient_account_id: str | None
     share_base_title: str | None
@@ -86,6 +97,7 @@ class OwnerShareManagementItem(ShareGrantRecord):
     invite: ShareInvite | None = None
     registered_at: str | None = None
     base_path: str | None = None
+    base_stats: BaseShareStats | None = None
 
 
 class RecipientShareViewItem(ShareGrantRecord):
@@ -96,6 +108,9 @@ class RecipientShareViewItem(ShareGrantRecord):
     activation_state: ShareActivationState
     session_state: str | None = None
     visible_in_mcp: bool
+    base_stats: BaseShareStats | None = None
+    authority_db_path: str | None = None
+    authority_available: bool = False
 
 
 class ShareGrantCreateRequest(BaseModel):
@@ -143,6 +158,7 @@ class RecipientBackupRequest(BaseModel):
 
 class RecipientBackupResult(BaseModel):
     filename: str
+    path: str | None = None
 
 
 class ShareInviteResponse(BaseModel):
@@ -241,6 +257,7 @@ class BaseShareSessionResult(BaseModel):
     session_state: str
     items: list[PageSummary] | list[PageSearchHit] | None = None
     item: PageDetail | PageGraph | None = None
+    stats: BaseShareStats | None = None
     share_base_title: str | None = None
     owner_display_name: str | None = None
     permission: str | None = None
@@ -271,3 +288,7 @@ class BaseShareListPayload(BaseShareErrorPayload):
 
 class BaseShareSearchPayload(BaseShareErrorPayload):
     items: list[RemoteSearchHit] = Field(default_factory=list)
+
+
+class BaseShareStatsPayload(BaseShareErrorPayload):
+    stats: BaseShareStats | None = None

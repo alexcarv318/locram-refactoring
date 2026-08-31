@@ -1,33 +1,44 @@
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ulid import ULID
 
+import database
 from database import open_knowledge_session
 from exceptions.pages import PageNotFoundError
 from exceptions.sharing import (
+    SharedBaseRequestError,
     SharedBaseSessionError,
     ShareGrantNotFoundError,
+    ShareReacceptRequiredError,
     SharingError,
     SharingNotReadyError,
     SharingTargetError,
 )
 from interfaces.repositories.bases import IBaseRegistryRepository
 from interfaces.repositories.sharing import ISharingRepository
-from interfaces.services.access import IAccessService
+from interfaces.services.access import AccessHttpClient, IAccessService
 from interfaces.services.sharing import ISharingService
 from models.bases import RegistryEntry
+from models.links import Link
+from models.pages import Page
 from models.sharing import BaseShareGrant
+from repositories.backups import BackupRepository
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
+from repositories.sharing import ShareSession
 from schemas.access import AcceptedShareRecord, InviteMintRequest
-from schemas.pages import PageSearchHit, PageStatus, PageUpdate
+from schemas.links import LinkType
+from schemas.pages import PageSearchHit, PageStatus, PageType, PageUpdate
 from schemas.sharing import (
     BaseShareSessionRequest,
     BaseShareSessionResult,
+    BaseShareStats,
     OwnerShareManagementItem,
     RecipientBackupResult,
     RecipientShareViewItem,
+    RemotePageDetail,
     ShareActivationState,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
@@ -36,6 +47,7 @@ from schemas.sharing import (
     ShareGrantState,
     ShareInvite,
 )
+from services.backups import BackupService
 from services.links import LinkService
 from services.pages import PageService
 
@@ -46,10 +58,12 @@ class SharingService(ISharingService):
         sharing_repository: ISharingRepository,
         base_registry_repository: IBaseRegistryRepository,
         access_service: IAccessService,
+        http_client: AccessHttpClient,
     ) -> None:
         self._sharing_repository = sharing_repository
         self._base_registry_repository = base_registry_repository
         self._access_service = access_service
+        self._http_client = http_client
 
     def list_owner_view(
         self,
@@ -233,10 +247,19 @@ class SharingService(ISharingService):
         return ShareGrantDeletedResponse(removed=True, grant_id=grant_id)
 
     def backup_recipient(self, grant_id: str, trigger: str) -> RecipientBackupResult:
-        self._accepted_share(grant_id)
-        raise SharingNotReadyError(
-            "Recipient backup needs a local shared-base file"
-        )
+        share = self._accepted_share(grant_id)
+
+        if share.permission is not ShareGrantPermission.ADMIN:
+            raise SharingError("Admin permission is required")
+
+        source = self._share_source_path(share)
+
+        if source is None:
+            source = self._materialize_share_mirror(share)
+
+        record = BackupService(BackupRepository(source)).create_backup(trigger)
+
+        return RecipientBackupResult(filename=record.filename, path=record.path)
 
     def run_session(self, payload: BaseShareSessionRequest) -> BaseShareSessionResult:
         grant_id = payload.transport_envelope.base_share_grant_id.strip()
@@ -319,6 +342,12 @@ class SharingService(ISharingService):
                 "unavailable",
                 "Shared base unavailable in current runtime.",
                 409,
+            )
+
+        if operation == "base_stats":
+            return BaseShareSessionResult(
+                session_state="ready",
+                stats=self._read_base_stats(Path(entry.path)),
             )
 
         session = open_knowledge_session(Path(entry.path))
@@ -468,6 +497,8 @@ class SharingService(ISharingService):
             if expires_at <= compared_at:
                 grant_state = ShareGrantState.EXPIRED
 
+        source = self._share_source_path(share)
+
         return RecipientShareViewItem(
             grant_id=share.grant_id,
             owner_actor_ref=share.owner_actor_ref,
@@ -488,6 +519,9 @@ class SharingService(ISharingService):
             activation_state=ShareActivationState.ACTIVE,
             session_state=share.session_state,
             visible_in_mcp=share.visible_in_mcp,
+            base_stats=self._stats_for_share(share, source),
+            authority_db_path=str(source) if source is not None else None,
+            authority_available=source is not None,
         )
 
     @staticmethod
@@ -548,6 +582,12 @@ class SharingService(ISharingService):
             if account_id != "":
                 recipient_account_id = account_id
 
+        source = Path(entry.path) if entry is not None and entry.path != "" else None
+        stats = None
+
+        if source is not None and source.is_file():
+            stats = self._read_base_stats(source)
+
         return OwnerShareManagementItem(
             grant_id=grant.grant_id,
             owner_actor_ref=grant.owner_actor_ref,
@@ -567,6 +607,7 @@ class SharingService(ISharingService):
             activation_state=self._activation_state(grant),
             registered_at=entry.created_at if entry is not None else None,
             base_path=entry.path if entry is not None else None,
+            base_stats=stats,
         )
 
     def _registry_entry_for_grant(self, grant: BaseShareGrant) -> RegistryEntry | None:
@@ -613,6 +654,243 @@ class SharingService(ISharingService):
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError as error:
             raise SharingError(f"invalid timestamp: {value}") from error
+
+    def _share_source_path(self, share: AcceptedShareRecord) -> Path | None:
+        grant = self._sharing_repository.get(share.grant_id)
+
+        if grant is not None:
+            entry = self._registry_entry_for_grant(grant)
+
+            if entry is not None:
+                path = Path(entry.path)
+
+                if path.is_file():
+                    return path
+
+        if share.share_entry_id is not None and share.share_entry_id != "":
+            entry = self._base_registry_repository.get(share.share_entry_id)
+
+            if entry is not None:
+                path = Path(entry.path)
+
+                if path.is_file():
+                    return path
+
+        return None
+
+    def _stats_for_share(
+        self,
+        share: AcceptedShareRecord,
+        source: Path | None,
+    ) -> BaseShareStats | None:
+        if source is not None:
+            return self._read_base_stats(source)
+
+        try:
+            return ShareSession(
+                share,
+                share.recipient_actor_ref,
+                self._http_client,
+            ).base_stats()
+        except (
+            SharedBaseRequestError,
+            SharedBaseSessionError,
+            ShareReacceptRequiredError,
+        ):
+            return None
+
+    def _materialize_share_mirror(self, share: AcceptedShareRecord) -> Path:
+        session = ShareSession(share, share.recipient_actor_ref, self._http_client)
+        pages = self._collect_remote_pages(session)
+
+        if not pages:
+            raise SharingNotReadyError("Shared base unavailable in current runtime.")
+
+        destination = database.shared_mirrors_path / f"{share.grant_id}.db"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if destination.is_file():
+            destination.unlink()
+
+        knowledge = open_knowledge_session(destination)
+
+        try:
+            added: set[str] = set()
+            remaining = list(pages)
+
+            while remaining:
+                ready = [
+                    page
+                    for page in remaining
+                    if page.parent_id is None or page.parent_id in added
+                ]
+
+                if not ready:
+                    ready = remaining
+
+                for page in ready:
+                    parent_id = page.parent_id
+
+                    if parent_id is not None and parent_id not in added:
+                        parent_id = None
+
+                    knowledge.add(self._page_from_remote(page, parent_id))
+                    added.add(page.id)
+
+                remaining = [page for page in remaining if page.id not in added]
+
+            knowledge.flush()
+
+            seen: set[tuple[str, str, str]] = set()
+
+            for page in pages:
+                for connection in page.connected_to:
+                    if connection.direction == "incoming":
+                        source_id = connection.id
+                        target_id = page.id
+                    else:
+                        source_id = page.id
+                        target_id = connection.id
+
+                    key = (source_id, target_id, connection.link_type)
+
+                    if key in seen or source_id not in added or target_id not in added:
+                        continue
+
+                    seen.add(key)
+                    knowledge.add(
+                        Link(
+                            source_id=source_id,
+                            target_id=target_id,
+                            link_type=LinkType(connection.link_type),
+                            created_at=self._now(),
+                        )
+                    )
+
+            knowledge.commit()
+        finally:
+            knowledge.close()
+
+        return destination
+
+    def _collect_remote_pages(self, session: ShareSession) -> list[RemotePageDetail]:
+        pages: list[RemotePageDetail] = []
+        pending = ["root"]
+        seen_parents: set[str] = set()
+
+        while pending:
+            parent_id = pending.pop(0)
+
+            if parent_id in seen_parents:
+                continue
+
+            seen_parents.add(parent_id)
+            items = session.list_pages(parent_id, 10_000, 0)
+
+            for item in items:
+                detail = session.get_page(item.id)
+
+                if detail is None:
+                    continue
+
+                pages.append(detail)
+                pending.append(item.id)
+
+        return pages
+
+    @staticmethod
+    def _page_from_remote(page: RemotePageDetail, parent_id: str | None) -> Page:
+        return Page(
+            id=page.id,
+            title=page.title,
+            content=page.content,
+            type=PageType(page.type),
+            status=PageStatus(page.status),
+            subject=page.subject,
+            tags=page.tags,
+            parent_id=parent_id,
+            content_hash=page.content_hash,
+            review_interval_days=page.review_interval_days,
+            created_at=page.created_at,
+            updated_at=page.updated_at,
+            reviewed_at=page.reviewed_at,
+        )
+
+    @staticmethod
+    def _read_base_stats(path: Path) -> BaseShareStats:
+        size_bytes = path.stat().st_size if path.is_file() else 0
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+        try:
+            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            return BaseShareStats(
+                page_count=SharingService._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status != 'to_delete'",
+                ),
+                active_page_count=SharingService._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active'",
+                ),
+                embedded_count=SharingService._optional_count(
+                    connection,
+                    "SELECT COUNT(DISTINCT page_id) FROM page_embeddings WHERE field = 'content'",
+                ),
+                link_count=SharingService._count(connection, "SELECT COUNT(*) FROM links"),
+                size_bytes=size_bytes,
+                orphan_count=SharingService._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages "
+                    "WHERE status = 'active' AND parent_id IS NULL "
+                    "AND id NOT IN (SELECT source_id FROM links) "
+                    "AND id NOT IN (SELECT target_id FROM links)",
+                ),
+                unembedded_count=SharingService._optional_count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
+                    "AND id NOT IN ("
+                    "SELECT page_id FROM page_embeddings WHERE field = 'content'"
+                    ")",
+                ),
+                due_for_review_count=SharingService._count(
+                    connection,
+                    "SELECT COUNT(*) FROM pages WHERE status = 'active' "
+                    "AND type != 'fleeting' AND datetime("
+                    "COALESCE(reviewed_at, updated_at), "
+                    "'+' || review_interval_days || ' days'"
+                    ") <= ?",
+                    (now,),
+                ),
+            )
+        except sqlite3.Error:
+            return BaseShareStats(size_bytes=size_bytes)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _count(
+        connection: sqlite3.Connection,
+        statement: str,
+        parameters: tuple[str, ...] = (),
+    ) -> int:
+        row = connection.execute(statement, parameters).fetchone()
+
+        if row is None or row[0] is None:
+            return 0
+
+        return int(row[0])
+
+    @staticmethod
+    def _optional_count(
+        connection: sqlite3.Connection,
+        statement: str,
+        parameters: tuple[str, ...] = (),
+    ) -> int | None:
+        try:
+            return SharingService._count(connection, statement, parameters)
+        except sqlite3.Error:
+            return None
 
     @staticmethod
     def _now() -> str:

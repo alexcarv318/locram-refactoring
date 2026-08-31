@@ -11,6 +11,8 @@ wheels/
 
 # Local SQLite
 locram.db
+*.db-shm
+*.db-wal
 
 .idea/
 .vscode/

@@ -372,9 +372,11 @@ def get_sharing_service(
     sharing_repository: ISharingRepository = Depends(get_sharing_repository),
     base_registry_repository: IBaseRegistryRepository = Depends(get_base_registry_repository),
     access_service: IAccessService = Depends(get_access_service),
+    http_client: AccessHttpClient = Depends(get_access_http_client),
 ) -> ISharingService:
     return SharingService(
         sharing_repository=sharing_repository,
         base_registry_repository=base_registry_repository,
         access_service=access_service,
+        http_client=http_client,
     )

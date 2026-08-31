@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from models.pages import Page
-from schemas.pages import PageSearchHit, PageStatus, PageSummary
+from schemas.pages import PageSearchHit, PageStatus, PageSummary, PageTitleRef
 
 
 class IPageRepository(ABC):
@@ -44,3 +44,6 @@ class IPageRepository(ABC):
 
     @abstractmethod
     def list_visible_pages(self) -> list[PageSummary]: ...
+
+    @abstractmethod
+    def find_by_title(self, title: str) -> list[PageTitleRef]: ...

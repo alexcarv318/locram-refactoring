@@ -2,7 +2,7 @@ import pytest
 
 from exceptions.access import AccessError
 from exceptions.bases import WorkingBaseNotFoundError
-from exceptions.sharing import ShareGrantNotFoundError, SharingError, SharingNotReadyError
+from exceptions.sharing import ShareGrantNotFoundError, SharingError
 from schemas.access import AccessShareSessionResolveRequest
 from schemas.sharing import ShareGrantCreateRequest, ShareGrantPermission, ShareGrantState
 from services.access import AccessService
@@ -125,7 +125,7 @@ def test_invite_and_recipient_after_enroll(
     )
     renamed = sharing_service.rename_recipient(created.grant_id, "Shared Notes")
 
-    with pytest.raises(SharingNotReadyError):
+    with pytest.raises(SharingError, match="Admin permission is required"):
         sharing_service.backup_recipient(created.grant_id, "manual")
 
     hidden = sharing_service.set_recipient_mcp_visibility(created.grant_id, False)
@@ -195,3 +195,35 @@ def test_expired_accepted_share_is_not_a_working_base(
         return
 
     raise AssertionError("expected WorkingBaseNotFoundError")
+
+
+def test_admin_recipient_backup(
+    sharing_service: SharingService,
+    enrolled_access: AccessService,
+) -> None:
+    sharing_service._access_service = enrolled_access
+    created = sharing_service.create_grant(
+        ShareGrantCreateRequest(
+            owner_actor_ref="device:owner-one",
+            recipient_account_id="alice",
+            permission=ShareGrantPermission.ADMIN,
+        )
+    )
+    invite = sharing_service.get_invite(created.grant_id, "Ada", None)
+    enrolled_access.resolve_share_session(
+        AccessShareSessionResolveRequest(input=invite.share_invite_url)
+    )
+    backup = sharing_service.backup_recipient(created.grant_id, "manual")
+    recipients = sharing_service.list_recipient_view(
+        recipient_actor_ref="account:alice",
+        recipient_account_id=None,
+        include_inactive=False,
+        evaluation_at=None,
+    )
+
+    assert backup.filename.startswith("locram-manual-")
+    assert backup.filename.endswith(".db")
+    assert backup.path is not None
+    assert recipients[0].authority_available is True
+    assert recipients[0].authority_db_path is not None
+    assert recipients[0].base_stats is not None

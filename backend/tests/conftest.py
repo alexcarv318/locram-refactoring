@@ -199,6 +199,7 @@ def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
         tmp_path / "preferences" / "accepted-shares.json",
     )
     monkeypatch.setattr(database, "managed_bases_path", tmp_path / "managed-bases")
+    monkeypatch.setattr(database, "shared_mirrors_path", tmp_path / "shared-mirrors")
     monkeypatch.setattr(
         database,
         "hosted_embedding_bootstrap_path",
@@ -464,6 +465,7 @@ def sharing_service(base_registry_service: BaseRegistryService) -> SharingServic
             http_client=ScriptedAccessHttp(),
             settings=AccessSettings(),
         ),
+        http_client=ScriptedAccessHttp(),
     )
 
 

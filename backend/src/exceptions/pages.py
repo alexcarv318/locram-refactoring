@@ -44,3 +44,13 @@ class PageTextNotFoundError(PageError):
         super().__init__("Text not found in page content")
 
         self.page_id = page_id
+
+
+class AmbiguousTitleError(PageError):
+    def __init__(self, title: str, match_count: int) -> None:
+        super().__init__(
+            f"Ambiguous title '{title}': {match_count} pages match. Use page_id instead."
+        )
+
+        self.title = title
+        self.match_count = match_count

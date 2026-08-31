@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.sharing import ShareGrantPermission, ShareTransportEnvelope
+from schemas.sharing import BaseShareStats, ShareGrantPermission, ShareTransportEnvelope
 
 
 @dataclass(frozen=True)
@@ -352,6 +352,7 @@ class ResolvedBaseShareSession(BaseModel):
     share_entry_id: str | None = None
     grant_created_at: str | None = None
     activated_at: str | None = None
+    base_stats: BaseShareStats | None = None
     transport_envelope: ShareTransportEnvelope
 
 
