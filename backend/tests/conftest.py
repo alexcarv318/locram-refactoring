@@ -124,6 +124,22 @@ class ScriptedAccessHttp:
         self.session_items: list[ConnectedOAuthSession] = []
         self.posts: list[str] = []
         self.gets: list[str] = []
+        self.activation_session_status = 200
+        self.activation_session_body: dict[str, str | int] = {
+            "activation_session_id": "session-one",
+            "activation_secret": "secret-one",
+            "approval_url": (
+                "https://app.locram.app/activate"
+                "?intent=activation&activation_session_id=session-one"
+            ),
+            "expires_at": 2000000000,
+        }
+        self.redeem_status = 200
+        self.redeem_body: dict[str, str | bool | int] = {
+            "activation_session_id": "session-one",
+            "status": "pending",
+            "expires_at": 2000000000,
+        }
 
     def get(
         self,
@@ -164,6 +180,12 @@ class ScriptedAccessHttp:
         if url.endswith("/api/devices/enroll"):
             return httpx.Response(self.enroll_status, json=self.enroll_body)
 
+        if url.endswith("/v1/activation/sessions"):
+            return httpx.Response(self.activation_session_status, json=self.activation_session_body)
+
+        if url.endswith("/redeem"):
+            return httpx.Response(self.redeem_status, json=self.redeem_body)
+
         return httpx.Response(200, json={"status": "ok"})
 
 
@@ -197,6 +219,11 @@ def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
         database,
         "accepted_shares_path",
         tmp_path / "preferences" / "accepted-shares.json",
+    )
+    monkeypatch.setattr(
+        database,
+        "desktop_activation_path",
+        tmp_path / "preferences" / "desktop-activation.json",
     )
     monkeypatch.setattr(database, "managed_bases_path", tmp_path / "managed-bases")
     monkeypatch.setattr(database, "shared_mirrors_path", tmp_path / "shared-mirrors")

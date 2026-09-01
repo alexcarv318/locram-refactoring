@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.access import access_router
@@ -22,6 +23,14 @@ from exceptions.app import AppError
 from mcp_server.main import mcp_server
 
 app = FastAPI(title="locram")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:1420", "http://localhost:1420"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(pages_router)
 app.include_router(links_router)
@@ -45,7 +54,7 @@ app.include_router(desktop_embeddings_router)
 async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
-        content={"detail": str(error)},
+        content={"detail": str(error), "error": str(error)},
     )
 
 

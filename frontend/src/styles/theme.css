@@ -1,0 +1,275 @@
+:root {
+    /** Base Colors **/
+    color-scheme: light;
+    --background: #ffffff;
+    --panel-background: #fafafa;
+    --foreground: #1a1a1a;
+    --card: #ffffff;
+    --card-foreground: #404040;
+    --popover: #ffffff;
+    --popover-foreground: #404040;
+    --primary: #8673DF;
+    --primary-foreground: #ffffff;
+    --secondary: #f5f5f5;
+    --secondary-foreground: #737373;
+    --muted: #f5f5f5;
+    --muted-foreground: var(--text-secondary);
+    --accent: #f5f2fd; /* Light purple tint */
+    --accent-foreground: #1a1a1a;
+    --destructive: #ee5000;
+    --destructive-foreground: #ffffff;
+    --mono: #0a0a0a;
+    --mono-foreground: #ffffff;
+    --custom-light-blue: #ede9fb; /* Light purple tint */
+    --custom-indigo: #8673DF;
+    --custom-deep-blue: #1a1a1a;
+
+    /* LEXRAG Brand Colors - Light Theme */
+    --phase-green: #06df72;
+    --axis-indigo: #593edc;
+    --axis-indigo-60: #241958;
+    --cloud-tint: #ebf0ff;
+    --cloud-tint-10: #d4d8e6;
+    --cloud-tint-20: #bcc0cc;
+    --cloud-tint-30: #a5a8b3;
+    --cloud-tint-50: #767880;
+    --cloud-tint-60: #5e6066;
+    --cloud-tint-70: #46484c;
+    --cloud-tint-80: #2f3033;
+    --midnight-deep-40: #0e1637;
+    --midnight-deep-50: #0c122e;
+    --midnight-deep-60: #090e25;
+    --midnight-deep-70: #070b1c;
+    --dark-grey: #808080;
+
+    /* Gradients */
+    --gradient-purple: linear-gradient(135deg, #c4b8f0 0%, #8673DF 100%);
+
+    /* Light Theme Elevation Scale */
+    --surface-1: #f5f2fd; /* Light purple-50 */
+    --surface-2: #ede9fb; /* Light purple-100 */
+
+    /* Text hierarchy */
+    --text-secondary: var(--cloud-tint-60);
+
+    /* Avatar fallback tokens (Light) */
+    --avatar-bg: rgba(237, 233, 251, 0.65);
+    --avatar-fg: #4a3899;
+    --avatar-border: rgba(134, 115, 223, 0.2);
+
+    /* Menu state tokens (Light) */
+    --menu-hover-bg: rgba(134, 115, 223, 0.05);
+    --menu-active-bg: rgba(134, 115, 223, 0.1);
+    --menu-hover-fg: #8673DF;
+    --menu-active-fg: #8673DF;
+
+    /** Base Styles - Light Theme **/
+    --border: rgba(229, 229, 229, 0.8);
+    --input: #f5f2fd;
+    --ring: rgba(134, 115, 223, 0.3);
+    --radius: 0.5rem;
+}
+
+.dark {
+    color-scheme: dark;
+    /** Base Colors **/
+    --background: rgb(25, 25, 25);
+    --panel-background: rgb(32, 32, 32);
+    --foreground: #d4d8e6;
+    --card: rgb(32, 32, 32);
+    --card-foreground: #ebf0ff;
+    --popover: rgb(32, 32, 32);
+    --popover-foreground: #ebf0ff;
+    --primary: #05b85c; /* Phase Green - darker */
+    --primary-foreground: #0a1a10;
+    --secondary: oklch(27.4% 0.006 286.033);
+    --secondary-foreground: oklch(70.5% 0.015 286.067);
+    --muted: oklch(21% 0.006 285.885);
+    --muted-foreground: var(--text-secondary);
+    --accent: rgba(5, 184, 92, 0.08); /* Subtle green tint for hover surfaces */
+    --accent-foreground: #ebf0ff;
+    --destructive: #ee5000;
+    --destructive-foreground: #ffffff;
+    --mono: oklch(87.1% 0.006 286.286);
+    --mono-foreground: oklch(0 0 0);
+    --custom-light-blue: rgba(5, 184, 92, 0.08); /* Green tint for tabs */
+    --custom-indigo: #05b85c;
+
+    /* LEXRAG Brand Colors */
+    --phase-green: #06df72;
+    --axis-indigo: #593edc;
+    --axis-indigo-60: #241958;
+    --cloud-tint: #ebf0ff;
+    --cloud-tint-20: #bcc0cc;
+    --cloud-tint-30: #a5a8b3;
+    --cloud-tint-50: #767880;
+    --cloud-tint-60: #5e6066;
+    --cloud-tint-70: #46484c;
+    --cloud-tint-80: #2f3033;
+    --midnight-deep-40: #0e1637;
+    --midnight-deep-50: #0c122e;
+    --midnight-deep-60: #090e25;
+    --midnight-deep-70: #070b1c;
+    --dark-grey: #808080;
+
+    /* Gradients */
+    --gradient-purple: linear-gradient(135deg, #7de8b4 0%, #05b85c 100%); /* Green gradient */
+
+    /* Dark Theme Elevation Scale */
+    --surface-1: var(--panel-background);
+    --surface-2: var(--card);
+
+    /* Text hierarchy */
+    --text-secondary: var(--cloud-tint-50);
+
+    /* Avatar fallback tokens (Dark) */
+    --avatar-bg: rgba(47, 48, 51, 0.65);
+    --avatar-fg: #ebf0ff;
+    --avatar-border: rgba(5, 184, 92, 0.2);
+
+    /* Menu state tokens (Dark) */
+    --menu-hover-bg: rgba(255, 255, 255, 0.05);
+    --menu-active-bg: rgba(5, 184, 92, 0.12);
+    --menu-hover-fg: #ebf0ff;
+    --menu-active-fg: #05b85c;
+
+    /** Base Styles **/
+    --border: rgba(45, 45, 45, 0.6);
+    --input: rgb(32, 32, 32);
+    --ring: rgba(5, 184, 92, 0.4);
+}
+
+/** Theme Setup **/
+@theme inline {
+    /** Base Colors **/
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+
+    --color-panel-background: var(--panel-background);
+
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+
+    --color-mono: var(--mono);
+    --color-mono-foreground: var(--mono-foreground);
+
+    /** LEXRAG Brand Colors **/
+    --color-phase-green: #06df72;
+    --color-axis-indigo: #593edc;
+    --color-axis-indigo-60: #241958;
+    --color-cloud-tint: #ebf0ff;
+    --color-cloud-tint-10: #d4d8e6;
+    --color-cloud-tint-20: #bcc0cc;
+    --color-cloud-tint-30: #a5a8b3;
+    --color-cloud-tint-50: #767880;
+    --color-cloud-tint-60: #5e6066;
+    --color-cloud-tint-70: #46484c;
+    --color-cloud-tint-80: #2f3033;
+    --color-midnight-deep-40: #0e1637;
+    --color-midnight-deep-50: #0c122e;
+    --color-midnight-deep-60: #090e25;
+    --color-midnight-deep-70: #070b1c;
+    --color-dark-grey: #808080;
+
+    /** Gradients **/
+    --color-gradient-purple: var(--gradient-purple);
+
+    /** Base Styles **/
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    /** Menu States **/
+    --color-menu-hover-bg: var(--menu-hover-bg);
+    --color-menu-active-bg: var(--menu-active-bg);
+    --color-menu-hover-fg: var(--menu-hover-fg);
+    --color-menu-active-fg: var(--menu-active-fg);
+
+    /** Text Colors **/
+    --color-text-secondary: var(--text-secondary);
+
+    /** Font Family **/
+    --font-sans: "Inter Fallback", sans-serif;
+
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+
+    --animate-accordion-down: accordion-down 0.2s ease-out;
+    --animate-accordion-up: accordion-up 0.2s ease-out;
+    --animate-collapsible-down: collapsible-down 0.2s ease-out;
+    --animate-collapsible-up: collapsible-up 0.2s ease-out;
+    --animate-caret-blink: caret-blink 1.25s ease-out infinite;
+
+    @keyframes accordion-down {
+        from {
+            height: 0;
+        }
+        to {
+            height: var(--radix-accordion-content-height);
+        }
+    }
+    @keyframes accordion-up {
+        from {
+            height: var(--radix-accordion-content-height);
+        }
+        to {
+            height: 0;
+        }
+    }
+    @keyframes collapsible-down {
+        from {
+            height: 0;
+        }
+        to {
+            height: var(--radix-collapsible-content-height);
+        }
+    }
+    @keyframes collapsible-up {
+        from {
+            height: var(--radix-collapsible-content-height);
+        }
+        to {
+            height: 0;
+        }
+    }
+    @keyframes caret-blink {
+        0%,
+        70%,
+        100% {
+            opacity: 1;
+        }
+        20%,
+        50% {
+            opacity: 0;
+        }
+    }
+}
+
+/** Custom Font Size **/
+@theme {
+    --text-2sm: 0.8125rem;
+    --text-2sm--line-height: calc(1.075 / 0.8125);
+
+    --text-2xs: 0.6875rem;
+    --text-2xs--line-height: calc(0.825 / 0.6875);
+}

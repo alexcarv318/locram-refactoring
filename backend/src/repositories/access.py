@@ -6,6 +6,7 @@ from schemas.access import (
     AcceptedShareRecord,
     AccessCredentialRecord,
     AccessSecrets,
+    DesktopActivationAttemptRecord,
 )
 
 
@@ -15,10 +16,12 @@ class AccessRepository(IAccessRepository):
         path: Path,
         credentials_path: Path | None = None,
         accepted_shares_path: Path | None = None,
+        activation_path: Path | None = None,
     ) -> None:
         self._path = path
         self._credentials_path = credentials_path or path.with_name("access-credentials.json")
         self._accepted_shares_path = accepted_shares_path or path.with_name("accepted-shares.json")
+        self._activation_path = activation_path or path.with_name("desktop-activation.json")
 
     def load(self) -> AccessCredentialRecord | None:
         if not self._path.is_file():
@@ -48,6 +51,24 @@ class AccessRepository(IAccessRepository):
 
         if self._credentials_path.is_file():
             self._credentials_path.unlink()
+
+    def load_activation_attempt(self) -> DesktopActivationAttemptRecord | None:
+        if not self._activation_path.is_file():
+            return None
+
+        return DesktopActivationAttemptRecord.model_validate_json(self._activation_path.read_text())
+
+    def save_activation_attempt(
+        self,
+        record: DesktopActivationAttemptRecord,
+    ) -> DesktopActivationAttemptRecord:
+        self._activation_path.parent.mkdir(parents=True, exist_ok=True)
+        self._activation_path.write_text(record.model_dump_json(indent=2))
+        return record
+
+    def clear_activation_attempt(self) -> None:
+        if self._activation_path.is_file():
+            self._activation_path.unlink()
 
     def list_accepted_shares(self) -> list[AcceptedShareRecord]:
         if not self._accepted_shares_path.is_file():

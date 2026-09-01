@@ -38,8 +38,11 @@ from schemas.access import (
     BrokerItemsResponse,
     BrokerSessionItemsResponse,
     ConnectedOAuthSession,
+    DesktopActivationAttemptRecord,
     InviteMintRequest,
     PendingAuthorizationRequest,
+    ProductActivationRedemption,
+    ProductActivationSession,
     RecoverReaction,
     RecoverReactionKind,
     RecoveryAction,
@@ -51,6 +54,11 @@ from schemas.access import (
     RelayStreamEnd,
     RelayStreamMeta,
     ResolvedBaseShareSession,
+)
+from schemas.bridge import (
+    DesktopActivationAttempt,
+    DesktopActivationStatus,
+    DesktopUsableCapabilities,
 )
 from schemas.sharing import ShareGrantPermission, ShareInvite, ShareTransportEnvelope
 
@@ -401,20 +409,31 @@ class AccessService(IAccessService):
         )
 
     def enroll(self, payload: AccessEnrollRequest) -> AccessSummary:
-        redemption_code = payload.redemption_code.strip()
+        redemption_code = (payload.redemption_code or "").strip()
+        entitlement_token = (payload.account_entitlement_token or "").strip()
 
-        if redemption_code == "":
+        if redemption_code == "" and entitlement_token == "":
             raise AccessError("redemption_code is required")
 
         broker_base_url = (payload.broker_base_url or self._settings.broker_base_url).rstrip("/")
-        public_key, private_key_pem = self.generate_device_keys()
+        public_key, private_key_pem = self._enroll_keys(payload)
         machine_label = (payload.machine_label or "").strip() or platform.node()
         request_body = {
             "client_public_key": public_key,
             "key_algorithm": "ed25519",
             "requested_mode": AccessMode.MANAGED_PUBLIC.value,
-            "redemption_code": redemption_code,
         }
+
+        if redemption_code != "":
+            request_body["redemption_code"] = redemption_code
+
+        if entitlement_token != "":
+            request_body["account_entitlement_token"] = entitlement_token
+
+        activation_session_id = (payload.activation_session_id or "").strip()
+
+        if activation_session_id != "":
+            request_body["activation_session_id"] = activation_session_id
 
         if machine_label != "":
             request_body["machine_label"] = machine_label
@@ -482,6 +501,17 @@ class AccessService(IAccessService):
         )
         self._access_repository.save(record)
         return self.summary()
+
+    def desktop_activation_status(self) -> DesktopActivationStatus:
+        return self._desktop_activation_status()
+
+    def start_or_continue_desktop_activation(self, machine_label: str | None) -> DesktopActivationStatus:
+        last_attempt = self._load_activation_attempt()
+
+        if last_attempt is not None and self._is_pending_activation(last_attempt):
+            return self._redeem_desktop_activation(last_attempt)
+
+        return self._start_desktop_activation(machine_label)
 
     def connect(self) -> AccessRuntimeResponse:
         record = self._access_repository.load()
@@ -914,6 +944,265 @@ class AccessService(IAccessService):
             ) from error
 
         return self._raise_for_broker(response)
+
+    def _start_desktop_activation(self, machine_label: str | None) -> DesktopActivationStatus:
+        public_key, private_key_pem = self.generate_device_keys()
+        label = (machine_label or "").strip() or platform.node()
+
+        request_body = {
+            "client_public_key": public_key,
+            "key_algorithm": "ed25519",
+        }
+
+        if label != "":
+            request_body["machine_label"] = label
+
+        response = self._product_post("/v1/activation/sessions", request_body)
+
+        try:
+            session = ProductActivationSession.model_validate_json(response.text)
+        except ValidationError as error:
+            raise AccessError(
+                "Locram Product API returned an invalid activation response.",
+                502,
+            ) from error
+
+        self._access_repository.save_activation_attempt(
+            DesktopActivationAttemptRecord(
+                state="pending",
+                observed_at=self._now(),
+                message="Browser activation required. Open the activation link, sign in, then return here.",
+                retryable=True,
+                activation_session_id=session.activation_session_id,
+                activation_secret=session.activation_secret,
+                approval_url=session.approval_url,
+                expires_at=self._timestamp_text(session.expires_at),
+                machine_label=label,
+                client_public_key=public_key,
+                client_private_key_pem=private_key_pem,
+            )
+        )
+        return self._desktop_activation_status()
+
+    def _redeem_desktop_activation(
+        self,
+        last_attempt: DesktopActivationAttemptRecord,
+    ) -> DesktopActivationStatus:
+        response = self._product_post(
+            f"/v1/activation/sessions/{last_attempt.activation_session_id}/redeem",
+            {"activation_secret": last_attempt.activation_secret or ""},
+        )
+
+        try:
+            redemption = ProductActivationRedemption.model_validate_json(response.text)
+        except ValidationError as error:
+            raise AccessError(
+                "Locram Product API returned an invalid redemption response.",
+                502,
+            ) from error
+
+        if redemption.status == "pending":
+            self._access_repository.save_activation_attempt(
+                last_attempt.model_copy(update={"observed_at": self._now()})
+            )
+            return self._desktop_activation_status()
+
+        if redemption.status == "redeemed":
+            return self._complete_redeemed_activation(last_attempt, redemption)
+
+        message, error_code = self._redemption_failure(redemption.status)
+        self._save_failed_activation(message, error_code)
+        return self._desktop_activation_status()
+
+    def _complete_redeemed_activation(
+        self,
+        last_attempt: DesktopActivationAttemptRecord,
+        redemption: ProductActivationRedemption,
+    ) -> DesktopActivationStatus:
+        token = (redemption.broker_enrollment_token or "").strip()
+        broker_base_url = self._broker_base_url_from_enroll_url(redemption.broker_enroll_url)
+
+        if not redemption.requires_broker_enrollment or token == "" or broker_base_url is None:
+            self._save_failed_activation(
+                "Sign-in finished, but broker enrollment details were missing. Start again.",
+                "broker_enrollment_incomplete",
+            )
+            return self._desktop_activation_status()
+
+        self.enroll(
+            AccessEnrollRequest(
+                account_entitlement_token=token,
+                activation_session_id=last_attempt.activation_session_id,
+                broker_base_url=broker_base_url,
+                machine_label=last_attempt.machine_label,
+                client_public_key=last_attempt.client_public_key,
+                client_private_key_pem=last_attempt.client_private_key_pem,
+            )
+        )
+        self._access_repository.save_activation_attempt(
+            DesktopActivationAttemptRecord(
+                state="succeeded",
+                observed_at=self._now(),
+                message="Signed in.",
+                retryable=False,
+            )
+        )
+        self.connect()
+        return self._desktop_activation_status()
+
+    def _desktop_activation_status(self) -> DesktopActivationStatus:
+        record = self._access_repository.load()
+        attempt = self._load_activation_attempt()
+        identity = self._account_identity(record)
+        state = "free"
+
+        if identity is not None and record is not None and self._has_credentials(record):
+            state = "active"
+        elif attempt is not None and attempt.state == "pending":
+            state = "not_activated"
+
+        return DesktopActivationStatus(
+            edition="free",
+            product_name="Locram",
+            state=state,
+            activation_required=identity is None,
+            broker_enrollment_available=True,
+            network_features_usable=True,
+            usable_capabilities=DesktopUsableCapabilities(
+                managed_public_mcp=True,
+                local_mcp_tool_visibility=True,
+                browser_account_setup=True,
+                share_base=True,
+                multi_base=True,
+                managed_updates=False,
+                docs_ggl_updates=True,
+                agent_base_administration=True,
+            ),
+            last_attempt=self._public_activation_attempt(attempt),
+        )
+
+    def _load_activation_attempt(self) -> DesktopActivationAttemptRecord | None:
+        try:
+            return self._access_repository.load_activation_attempt()
+        except ValidationError:
+            return None
+
+    def _save_failed_activation(self, message: str, error_code: str) -> None:
+        self._access_repository.save_activation_attempt(
+            DesktopActivationAttemptRecord(
+                state="failed_retryable",
+                observed_at=self._now(),
+                message=message,
+                error_code=error_code,
+                retryable=True,
+            )
+        )
+
+    def _product_post(self, path: str, body: dict[str, str]) -> httpx.Response:
+        url = f"{self._settings.product_api_url.rstrip('/')}{path}"
+
+        try:
+            response = self._http_client.post(
+                url,
+                json=body,
+                timeout=self._settings.broker_timeout_seconds,
+            )
+        except httpx.RequestError as error:
+            raise AccessError(
+                "Activation could not reach the Locram Product API. "
+                "Check the network and retry.",
+                502,
+            ) from error
+
+        if response.status_code < 400:
+            return response
+
+        if response.status_code in {400, 401, 403, 404, 409, 410, 422}:
+            raise AccessError(
+                "Activation session was rejected. Start sign-in again.",
+                response.status_code,
+            )
+
+        raise AccessError(
+            "Locram Product API returned a temporary error. Retry sign-in later.",
+            502,
+        )
+
+    @staticmethod
+    def _enroll_keys(payload: AccessEnrollRequest) -> tuple[str, str]:
+        public_key = (payload.client_public_key or "").strip()
+        private_key_pem = (payload.client_private_key_pem or "").strip()
+
+        if public_key != "" and private_key_pem != "":
+            return public_key, private_key_pem
+
+        return AccessService.generate_device_keys()
+
+    @staticmethod
+    def _is_pending_activation(attempt: DesktopActivationAttemptRecord | None) -> bool:
+        if attempt is None:
+            return False
+
+        if attempt.state != "pending":
+            return False
+
+        return (
+            attempt.activation_session_id is not None
+            and attempt.activation_secret is not None
+            and attempt.client_public_key is not None
+            and attempt.client_private_key_pem is not None
+        )
+
+    @staticmethod
+    def _public_activation_attempt(
+        attempt: DesktopActivationAttemptRecord | None,
+    ) -> DesktopActivationAttempt | None:
+        if attempt is None:
+            return None
+
+        return DesktopActivationAttempt(
+            state=attempt.state,
+            observed_at=attempt.observed_at,
+            message=attempt.message,
+            error_code=attempt.error_code,
+            retryable=attempt.retryable,
+            activation_session_id=attempt.activation_session_id,
+            approval_url=attempt.approval_url,
+            expires_at=attempt.expires_at,
+            transfer_session_id=attempt.transfer_session_id,
+        )
+
+    @staticmethod
+    def _broker_base_url_from_enroll_url(enroll_url: str | None) -> str | None:
+        parsed = urlparse((enroll_url or "").strip())
+
+        if parsed.scheme not in {"http", "https"} or parsed.netloc == "":
+            return None
+
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @staticmethod
+    def _timestamp_text(value: str | int | None) -> str | None:
+        if value is None:
+            return None
+
+        if type(value) is int:
+            return datetime.fromtimestamp(value, UTC).isoformat()
+
+        return str(value)
+
+    @staticmethod
+    def _redemption_failure(status: str) -> tuple[str, str]:
+        if status == "expired":
+            return (
+                "Activation session expired. Start sign-in again.",
+                "activation_session_expired",
+            )
+
+        return (
+            "Activation could not be completed. Start sign-in again.",
+            "activation_session_unredeemable",
+        )
 
     def _http_post(self, url: str, body: dict[str, str]) -> httpx.Response:
         try:

@@ -1,3 +1,4 @@
+from os import environ
 from pathlib import Path
 
 from alembic import command
@@ -38,18 +39,20 @@ class KnowledgeEngines:
         self.engines.clear()
 
 
-host_state_path = Path.home() / ".locram" / "host-state.db"
-knowledge_path = Path.home() / ".locram" / "locram.db"
-attachments_path = Path.home() / ".locram" / "attachments"
-filter_presets_path = Path.home() / ".locram" / "preferences" / "filter-presets.json"
-embedding_settings_path = Path.home() / ".locram" / "preferences" / "embedding-settings.json"
-huggingface_api_key_path = Path.home() / ".locram" / "preferences" / "huggingface-api-key"
-hosted_embedding_bootstrap_path = Path.home() / ".locram" / "preferences" / "hosted-embedding-bootstrap.json"
-access_path = Path.home() / ".locram" / "preferences" / "access.json"
-access_credentials_path = Path.home() / ".locram" / "preferences" / "access-credentials.json"
-accepted_shares_path = Path.home() / ".locram" / "preferences" / "accepted-shares.json"
-managed_bases_path = Path.home() / ".locram" / "managed-bases"
-shared_mirrors_path = Path.home() / ".locram" / "shared-mirrors"
+locram_home = Path(environ.get("LOCRAM_HOME", str(Path.home() / ".locram"))).expanduser()
+host_state_path = locram_home / "host-state.db"
+knowledge_path = locram_home / "locram.db"
+attachments_path = locram_home / "attachments"
+filter_presets_path = locram_home / "preferences" / "filter-presets.json"
+embedding_settings_path = locram_home / "preferences" / "embedding-settings.json"
+huggingface_api_key_path = locram_home / "preferences" / "huggingface-api-key"
+hosted_embedding_bootstrap_path = locram_home / "preferences" / "hosted-embedding-bootstrap.json"
+access_path = locram_home / "preferences" / "access.json"
+access_credentials_path = locram_home / "preferences" / "access-credentials.json"
+desktop_activation_path = locram_home / "preferences" / "desktop-activation.json"
+accepted_shares_path = locram_home / "preferences" / "accepted-shares.json"
+managed_bases_path = locram_home / "managed-bases"
+shared_mirrors_path = locram_home / "shared-mirrors"
 managed_base_seeds_path = Path(__file__).resolve().parent.parent / "managed_base_seeds"
 
 if not managed_base_seeds_path.is_dir():

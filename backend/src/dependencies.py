@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from functools import lru_cache
+from os import environ
 from pathlib import Path
 
 import httpx
@@ -101,12 +102,15 @@ def get_access_repository() -> IAccessRepository:
         database.access_path,
         database.access_credentials_path,
         database.accepted_shares_path,
+        database.desktop_activation_path,
     )
 
 
 @lru_cache
 def get_access_settings() -> AccessSettings:
-    return AccessSettings()
+    return AccessSettings(
+        product_api_url=environ.get("LOCRAM_PRODUCT_API_URL", "https://api.locram.app").rstrip("/"),
+    )
 
 
 @lru_cache
@@ -298,8 +302,12 @@ def get_change_service(
 
 def get_bridge_service(
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
+    access_service: IAccessService = Depends(get_access_service),
 ) -> IBridgeService:
-    return BridgeService(base_registry_service=base_registry_service)
+    return BridgeService(
+        base_registry_service=base_registry_service,
+        access_service=access_service,
+    )
 
 
 def get_attachment_service() -> IAttachmentService:

@@ -19,6 +19,7 @@ from schemas.access import (
     PendingAuthorizationRequest,
     ResolvedBaseShareSession,
 )
+from schemas.bridge import DesktopActivationStatus
 from schemas.sharing import ShareInvite
 
 
@@ -62,10 +63,11 @@ class IAccessRelay(ABC):
 
 
 class IAccessService(ABC):
-    """Access: device client for the Locram broker.
+    """Access: device client for the Locram broker and product-api sign-in.
 
     Enroll this machine, persist credentials, expose identity, run the
-    in-process relay, approve MCP authorizations, and resolve share invites.
+    in-process relay, approve MCP authorizations, resolve share invites, and
+    complete browser sign-in against production product-api.
     """
 
     @abstractmethod
@@ -76,6 +78,15 @@ class IAccessService(ABC):
 
     @abstractmethod
     def enroll(self, payload: AccessEnrollRequest) -> AccessSummary: ...
+
+    @abstractmethod
+    def desktop_activation_status(self) -> DesktopActivationStatus: ...
+
+    @abstractmethod
+    def start_or_continue_desktop_activation(
+        self,
+        machine_label: str | None,
+    ) -> DesktopActivationStatus: ...
 
     @abstractmethod
     def connect(self) -> AccessRuntimeResponse: ...

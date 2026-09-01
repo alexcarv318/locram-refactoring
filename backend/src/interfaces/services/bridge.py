@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
 
-from schemas.bridge import HealthResponse, RuntimeSummary
+from schemas.bridge import DesktopActivationStatus, HealthResponse, RuntimeSummary, SessionBootstrap
+from schemas.changes import DataVersion
 
 
 class IBridgeService(ABC):
     """Bridge: desktop sidecar probes.
 
-    Health check and runtime summary (home, db path, active base).
+    Health, runtime, session bootstrap, and desktop activation status for the
+    React app.
     """
 
     @abstractmethod
@@ -14,3 +16,15 @@ class IBridgeService(ABC):
 
     @abstractmethod
     def runtime(self) -> RuntimeSummary: ...
+
+    @abstractmethod
+    def session_bootstrap(self, data_version: DataVersion) -> SessionBootstrap: ...
+
+    @abstractmethod
+    def desktop_activation(self) -> DesktopActivationStatus: ...
+
+    @abstractmethod
+    def start_or_continue_desktop_activation(
+        self,
+        machine_label: str | None,
+    ) -> DesktopActivationStatus: ...

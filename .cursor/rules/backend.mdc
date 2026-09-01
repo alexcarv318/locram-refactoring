@@ -210,7 +210,7 @@ ruff check . --fix
 ## Feature order
 
 - Pages first. A page lives in one SQLite file. Bases only choose which file later.
-- Bridge is HTTP only: `GET /api/health` and `GET /api/runtime`. No MCP tools.
+- Bridge is HTTP only: `GET /api/health`, `GET /api/runtime`, `GET /api/session/bootstrap`, and `GET /api/desktop/activation`. No MCP tools.
 - Attachments are files under `attachments_path`, referenced from page content as `![[filename]]`.
 - Smart folders are JSON presets plus eight built-in scopes. Pages embed filters; matching is metadata-only.
 - Embeddings store float32 vectors on the page SQLite file. Hybrid search fuses full text search with cosine similarity and falls back to lexical search when no provider is configured. Settings choose hosted, Hugging Face, or Ollama. Hosted uses the enrolled Access relay token against `embed.locram.app`, or a bootstrap token before enroll.

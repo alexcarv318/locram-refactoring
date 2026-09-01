@@ -2,14 +2,101 @@ import httpx
 
 import database
 from exceptions.access import AccessError
+from interfaces.services.access import IAccessRelay
+from repositories.access import AccessRepository
 from schemas.access import (
+    AccessCredentialRecord,
     AccessEnrollRequest,
+    AccessSettings,
     AccessShareSessionResolveRequest,
     AccessState,
     InviteMintRequest,
 )
 from schemas.sharing import ShareGrantPermission
 from services.access import AccessService
+
+
+class _QuietRelay(IAccessRelay):
+    def start(self, record: AccessCredentialRecord) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def running(self) -> bool:
+        return False
+
+    def state(self) -> AccessState:
+        return AccessState.UNAVAILABLE
+
+    def last_error(self) -> str | None:
+        return None
+
+
+class _ActivationHttp:
+    def __init__(self) -> None:
+        self.posts: list[str] = []
+        self.redeem_body: dict[str, str | bool | int] = {
+            "activation_session_id": "session-one",
+            "status": "pending",
+            "expires_at": 2000000000,
+        }
+
+    def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        return httpx.Response(404, json={"error": "missing"})
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: dict[str, str] | None = None,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        self.posts.append(url)
+
+        if url.endswith("/v1/activation/sessions"):
+            return httpx.Response(
+                200,
+                json={
+                    "activation_session_id": "session-one",
+                    "activation_secret": "secret-one",
+                    "approval_url": "https://app.locram.app/activate?session=session-one",
+                    "expires_at": 2000000000,
+                },
+            )
+
+        if url.endswith("/redeem"):
+            return httpx.Response(200, json=self.redeem_body)
+
+        if url.endswith("/api/devices/enroll"):
+            return httpx.Response(
+                200,
+                json={
+                    "device_id": "device-one",
+                    "relay_url": "wss://broker.example.test/relay",
+                    "relay_token": "relay-token",
+                    "authorization_server_url": "https://broker.example.test",
+                    "protected_resource_url": "https://device-one.locram.app/mcp",
+                    "public_mcp_url": "https://device-one.locram.app/mcp",
+                    "account_identity": {
+                        "email": "ada@example.test",
+                        "display_name": "Ada",
+                        "account_id": "acct-one",
+                    },
+                },
+            )
+
+        return httpx.Response(200, json={"status": "ok"})
 
 
 def test_summary_and_identity_are_unenrolled(access_service: AccessService) -> None:
@@ -163,6 +250,69 @@ def test_broker_network_error_is_access_error(enrolled_access: AccessService) ->
         enrolled_access.list_pending_authorizations()
     except AccessError as error:
         assert error.status_code == 502
+    else:
+        raise AssertionError("expected AccessError")
+
+
+def test_desktop_activation_starts_pending_product_session(
+    access_service: AccessService,
+) -> None:
+    started = access_service.start_or_continue_desktop_activation("Alex Mac")
+    again = access_service.start_or_continue_desktop_activation(None)
+
+    assert started.state == "not_activated"
+    assert started.last_attempt is not None
+    assert started.last_attempt.state == "pending"
+    assert started.last_attempt.approval_url is not None
+    assert "activate" in started.last_attempt.approval_url
+    assert started.last_attempt.activation_session_id == "session-one"
+    assert again.last_attempt is not None
+    assert again.last_attempt.state == "pending"
+    assert again.last_attempt.activation_session_id == "session-one"
+
+
+def test_desktop_activation_enrolls_after_redeem() -> None:
+    http_client = _ActivationHttp()
+    access_service = AccessService(
+        access_repository=AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        ),
+        access_relay=_QuietRelay(),
+        http_client=http_client,
+        settings=AccessSettings(),
+    )
+    access_service.start_or_continue_desktop_activation(None)
+    http_client.redeem_body = {
+        "activation_session_id": "session-one",
+        "status": "redeemed",
+        "requires_broker_enrollment": True,
+        "broker_enrollment_token": "entitlement-one",
+        "broker_enroll_url": "https://broker.example.test/api/devices/enroll",
+    }
+    completed = access_service.start_or_continue_desktop_activation(None)
+    identity = access_service.summary().account_identity
+
+    assert completed.state == "active"
+    assert completed.activation_required is False
+    assert completed.last_attempt is not None
+    assert completed.last_attempt.state == "succeeded"
+    assert identity is not None
+    assert identity.email == "ada@example.test"
+    assert any(url.endswith("/api/devices/enroll") for url in http_client.posts)
+
+
+def test_desktop_activation_raises_when_product_api_is_down(
+    access_service: AccessService,
+) -> None:
+    access_service._http_client = UnreachableAccessHttp()
+
+    try:
+        access_service.start_or_continue_desktop_activation(None)
+    except AccessError as error:
+        assert error.status_code == 502
+        assert "Product API" in str(error)
     else:
         raise AssertionError("expected AccessError")
 

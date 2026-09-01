@@ -1,0 +1,46 @@
+export type GraphResponseNode = {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  scope_origin?: "seed" | "context";
+  scopeOrigin?: "seed" | "context";
+  labels?: string[];
+  color?: string;
+  heading?: string;
+  name?: string;
+  content?: string;
+  fullContent?: string;
+  simplifiedContent?: string;
+  number?: string | number;
+  subject: string[];
+  tags: string[];
+  parentId?: string | null;
+  snippet?: string;
+  created_at?: string;
+  updated_at?: string;
+  reviewed_at?: string | null;
+  review_interval_days?: number | null;
+  opacity?: number;
+  tagLinkCount?: number;
+  x?: number;
+  y?: number;
+  z?: number;
+  vx?: number;
+  vy?: number;
+  vz?: number;
+  fx?: number;
+  fy?: number;
+  fz?: number;
+  __isPending?: boolean;
+};
+
+export type GraphResponseLink = {
+  source: string | { id: string };
+  target: string | { id: string };
+  id?: string;
+  type?: string;
+  parentChild?: boolean;
+  __isPending?: boolean;
+  _fetchedOnly?: boolean;
+};

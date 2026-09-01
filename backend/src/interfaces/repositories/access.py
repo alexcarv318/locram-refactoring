@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
-from schemas.access import AcceptedShareRecord, AccessCredentialRecord
+from schemas.access import (
+    AcceptedShareRecord,
+    AccessCredentialRecord,
+    DesktopActivationAttemptRecord,
+)
 
 
 class IAccessRepository(ABC):
@@ -12,6 +16,15 @@ class IAccessRepository(ABC):
 
     @abstractmethod
     def clear(self) -> None: ...
+
+    @abstractmethod
+    def load_activation_attempt(self) -> DesktopActivationAttemptRecord | None: ...
+
+    @abstractmethod
+    def save_activation_attempt(self, record: DesktopActivationAttemptRecord) -> DesktopActivationAttemptRecord: ...
+
+    @abstractmethod
+    def clear_activation_attempt(self) -> None: ...
 
     @abstractmethod
     def list_accepted_shares(self) -> list[AcceptedShareRecord]: ...

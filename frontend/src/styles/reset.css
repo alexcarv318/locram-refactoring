@@ -1,0 +1,19 @@
+@layer base {
+    * {
+        @apply border-border;
+    }
+
+    *:focus-visible {
+        @apply outline-ring rounded-xs shadow-none outline-2 outline-offset-3 transition-none!;
+    }
+
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+    }
+}
+

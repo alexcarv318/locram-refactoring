@@ -49,6 +49,7 @@ class AccessConnectedHeaders:
 @dataclass(frozen=True)
 class AccessSettings:
     broker_base_url: str = "https://broker.locram.app"
+    product_api_url: str = "https://api.locram.app"
     local_http_origin: str = "http://127.0.0.1:8757"
     heartbeat_seconds: int = 25
     reconnect_base_seconds: float = 2.0
@@ -181,9 +182,50 @@ class AccessRecoverResult(BaseModel):
 
 
 class AccessEnrollRequest(BaseModel):
-    redemption_code: str
+    redemption_code: str | None = None
     broker_base_url: str | None = None
     machine_label: str | None = None
+    account_entitlement_token: str | None = None
+    activation_session_id: str | None = None
+    client_public_key: str | None = None
+    client_private_key_pem: str | None = None
+
+
+class DesktopActivationAttemptRecord(BaseModel):
+    state: str
+    observed_at: str
+    message: str | None = None
+    error_code: str | None = None
+    retryable: bool = True
+    activation_session_id: str | None = None
+    activation_secret: str | None = None
+    approval_url: str | None = None
+    expires_at: str | None = None
+    machine_label: str | None = None
+    client_public_key: str | None = None
+    client_private_key_pem: str | None = None
+    key_algorithm: str = "ed25519"
+    transfer_session_id: str | None = None
+
+
+class ProductActivationSession(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    activation_session_id: str
+    activation_secret: str
+    approval_url: str
+    expires_at: int | str | None = None
+
+
+class ProductActivationRedemption(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    activation_session_id: str
+    status: str
+    expires_at: int | str | None = None
+    requires_broker_enrollment: bool = False
+    broker_enrollment_token: str | None = None
+    broker_enroll_url: str | None = None
 
 
 class AccessShareSessionResolveRequest(BaseModel):

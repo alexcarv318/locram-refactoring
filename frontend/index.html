@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Locram</title>
+    <script>
+      (function () {
+        try {
+          var raw = window.localStorage.getItem("locram-ui-preferences");
+          if (!raw) return;
+          var parsed = JSON.parse(raw);
+          var state = (parsed && parsed.state) || {};
+          var validLocales = ["en", "ru", "ar"];
+          var validDirections = ["ltr", "rtl", "auto"];
+          var rtlPrefixes = ["ar", "he", "fa", "ur", "yi", "dv", "ps"];
+          var locale =
+            validLocales.indexOf(state.locale) >= 0 ? state.locale : "en";
+          var direction =
+            validDirections.indexOf(state.direction) >= 0
+              ? state.direction
+              : "auto";
+          var resolvedDirection;
+          if (direction === "ltr" || direction === "rtl") {
+            resolvedDirection = direction;
+          } else {
+            var base = String(locale).toLowerCase().split(/[-_]/)[0] || "";
+            resolvedDirection = rtlPrefixes.indexOf(base) >= 0 ? "rtl" : "ltr";
+          }
+          var root = document.documentElement;
+          root.setAttribute("lang", locale);
+          root.setAttribute("dir", resolvedDirection);
+          root.setAttribute("data-dir", resolvedDirection);
+        } catch (error) {
+          // Fall back to the static defaults in the <html> tag.
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
