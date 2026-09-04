@@ -795,6 +795,7 @@ export const ru: Record<DictionaryKey, string> = {
   "bases.detail.entryId": "id записи",
   "bases.detail.grantId": "id гранта",
   "bases.detail.artifactId": "id артефакта",
+  "bases.detail.sourceBase": "исходная база",
   "bases.detail.sourceBaseId": "id исходной базы",
   "bases.detail.registered": "зарегистрирована",
   "bases.detail.created": "создана",

@@ -8,6 +8,7 @@ import {
   deleteExport,
   executeMerge,
   fetchMergePlan,
+  fetchBases,
   inspectArtifact,
   registerBase,
   renameBackup,
@@ -32,7 +33,9 @@ import {
 import ActionButton from "@/components/ui/ActionButton";
 import InlineConfirm from "@/components/tree/InlineConfirm";
 import InlineItemEditor from "@/components/tree/InlineItemEditor";
+import { useDesktopShellContext } from "@/components/shell/desktopShellContext";
 import { useT } from "@/i18n/useT";
+import { workingBaseReadOptions } from "@/lib/workingBaseReadOptions";
 import { useEditorStore } from "@/stores/editorStore";
 import type { MergePlanSummary, RestoreResult } from "@/types";
 import type { FileHomeSource } from "@/types/source";
@@ -86,6 +89,19 @@ function MergePlanCard({ plan }: { plan: MergePlanSummary }) {
 export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHomeViewProps) {
   const t = useT();
   const locale = useUiPreferencesStore((state) => state.locale);
+  const { activeSource } = useDesktopShellContext();
+  const workingBaseRef = workingBaseReadOptions(activeSource)?.baseRef;
+  const basesQuery = useQuery({
+    enabled: bridgeBaseUrl.length > 0,
+    queryKey: ["bases", bridgeBaseUrl],
+    queryFn: () => fetchBases(bridgeBaseUrl),
+  });
+  const activeLocalBaseRef =
+    basesQuery.data?.active_base === undefined
+      ? undefined
+      : `local:${basesQuery.data.active_base.entry_id}`;
+  const artifactBaseRef = source.sourceBaseRef ?? workingBaseRef;
+  const targetBaseRef = activeLocalBaseRef ?? workingBaseRef;
   const queryClient = useQueryClient();
   const retargetFileHomeSource = useEditorStore((state) => state.retargetFileHomeSource);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
@@ -349,7 +365,7 @@ export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHom
     setActionError(null);
     setActionNotice(null);
     try {
-      const plan = await fetchMergePlan(bridgeBaseUrl, source.path);
+      const plan = await fetchMergePlan(bridgeBaseUrl, source.path, targetBaseRef);
       setMergePlan(plan);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Merge planning failed");
@@ -367,7 +383,7 @@ export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHom
     setActionError(null);
     setActionNotice(null);
     try {
-      const outcome = await executeMerge(bridgeBaseUrl, source.path);
+      const outcome = await executeMerge(bridgeBaseUrl, source.path, targetBaseRef);
       setMergePlan(null);
       setActionNotice(
         `Merged ${outcome.inserted_page_count} pages and ${outcome.inserted_link_count} edges into the active base.`,
@@ -393,6 +409,8 @@ export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHom
       const result = await restoreBackup(
         bridgeBaseUrl,
         { path: source.path, filename: source.filename ?? undefined, allowBaseReplacement },
+        false,
+        targetBaseRef,
       );
       setRestoreResult(result);
       setActionNotice(`Restored the active base from ${source.filename ?? headerTitle}.`);
@@ -415,11 +433,21 @@ export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHom
       let nextPath = source.path;
       let nextFilename = nextName;
       if (source.managementScope === "managed_backup") {
-        const renamed = await renameBackup(bridgeBaseUrl, source.filename, nextName);
+        const renamed = await renameBackup(
+          bridgeBaseUrl,
+          source.filename,
+          nextName,
+          artifactBaseRef,
+        );
         nextPath = renamed.path ?? source.path;
         nextFilename = renamed.filename;
       } else if (source.managementScope === "managed_export") {
-        const renamed = await renameExport(bridgeBaseUrl, source.filename, nextName);
+        const renamed = await renameExport(
+          bridgeBaseUrl,
+          source.filename,
+          nextName,
+          artifactBaseRef,
+        );
         nextPath = renamed.path;
         nextFilename = renamed.filename;
       }
@@ -457,9 +485,9 @@ export default function FileHomeView({ bridgeBaseUrl, onClose, source }: FileHom
     setActionNotice(null);
     try {
       if (source.managementScope === "managed_backup") {
-        await deleteBackup(bridgeBaseUrl, source.filename);
+        await deleteBackup(bridgeBaseUrl, source.filename, artifactBaseRef);
       } else if (source.managementScope === "managed_export") {
-        await deleteExport(bridgeBaseUrl, source.filename);
+        await deleteExport(bridgeBaseUrl, source.filename, artifactBaseRef);
       }
       await refreshAfterMutation();
       onClose();

@@ -17,11 +17,18 @@ import type { BackupSummary, RestoreResult } from "@/types";
 interface BackupRestoreModalProps {
   backup: BackupSummary;
   baseUrl: string;
+  baseRef?: string;
   onClose: () => void;
   onRestored: () => void;
 }
 
-export default function BackupRestoreModal({ backup, baseUrl, onClose, onRestored }: BackupRestoreModalProps) {
+export default function BackupRestoreModal({
+  backup,
+  baseUrl,
+  baseRef,
+  onClose,
+  onRestored,
+}: BackupRestoreModalProps) {
   const [isRestoring, setIsRestoring] = useState(false);
   const [result, setResult] = useState<RestoreResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +45,8 @@ export default function BackupRestoreModal({ backup, baseUrl, onClose, onRestore
           path: backup.path ?? undefined,
           allowBaseReplacement,
         },
+        false,
+        baseRef,
       );
       setResult(restoreResult);
     } catch (err) {

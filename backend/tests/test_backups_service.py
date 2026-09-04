@@ -20,7 +20,7 @@ def test_create_list_rename_and_delete(backup_service: BackupService) -> None:
     renamed = backup_service.rename_backup(created.filename, "locram-renamed-20260101T000000Z.db")
     deleted = backup_service.delete_backup(renamed.filename)
 
-    assert created.filename.startswith("locram-manual-")
+    assert created.filename.startswith("Notes-manual-")
     assert created.page_count == 1
     assert created.active_page_count == 1
     assert created.display_name == "Notes"
@@ -29,6 +29,43 @@ def test_create_list_rename_and_delete(backup_service: BackupService) -> None:
     assert renamed.filename == "locram-renamed-20260101T000000Z.db"
     assert deleted.deleted is True
     assert backup_service.list_backups() == []
+
+
+def test_rename_without_timestamp_keeps_created_at(backup_service: BackupService) -> None:
+    created = backup_service.create_backup("manual")
+    renamed = backup_service.rename_backup(created.filename, "locram-mcp-audit-renamed.db")
+
+    assert renamed.filename == f"locram-mcp-audit-renamed-{created.created_at}.db"
+    assert renamed.created_at == created.created_at
+    assert renamed.trigger == "mcp-audit-renamed"
+
+    backup_service.delete_backup(renamed.filename)
+
+
+def test_manual_backup_uses_base_display_name(tmp_path: Path) -> None:
+    source_path = tmp_path / "knowledge.db"
+    session = open_knowledge_session(source_path)
+    session.add(BaseMetadata(base_id="base-medicine", display_name="medicine"))
+    session.commit()
+    PageService(PageRepository(session), LinkRepository(session)).create_page(
+        PageCreate(title="Kept", content="original")
+    )
+    session.close()
+    service = BackupService(backup_repository=BackupRepository(source_path=source_path))
+    created = service.create_backup("manual")
+
+    assert created.filename.startswith("medicine-manual-")
+    assert created.filename.endswith(".db")
+
+    leftover = source_path.parent / "backups" / "locram-manual-20260101T000000Z.db"
+    leftover.write_bytes((source_path.parent / "backups" / created.filename).read_bytes())
+    names = {item.filename for item in service.list_backups()}
+
+    assert created.filename in names
+    assert leftover.name in names
+
+    service.delete_backup(created.filename)
+    service.delete_backup(leftover.name)
 
 
 def test_restore_replaces_live_database(backup_service: BackupService) -> None:

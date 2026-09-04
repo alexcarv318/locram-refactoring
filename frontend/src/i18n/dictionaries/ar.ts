@@ -815,6 +815,7 @@ export const ar: Record<DictionaryKey, string> = {
   "bases.detail.entryId": "معرّف السجل",
   "bases.detail.grantId": "معرّف المنح",
   "bases.detail.artifactId": "معرّف الأثر",
+  "bases.detail.sourceBase": "القاعدة المصدر",
   "bases.detail.sourceBaseId": "معرّف القاعدة المصدر",
   "bases.detail.registered": "مسجَّلة",
   "bases.detail.created": "أُنشئت",

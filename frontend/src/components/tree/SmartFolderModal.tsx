@@ -26,6 +26,7 @@ import {
 import { FiltersPanel } from "@/components/filters/FiltersPanel";
 import { FilterIcon } from "@/components/icons/Icons";
 import { useDesktopShellContext } from "@/components/shell/desktopShellContext";
+import { workingBaseReadOptions } from "@/lib/workingBaseReadOptions";
 import { cn } from "@/lib/utils/cn";
 import { useGraphFiltersStore } from "@/stores/graphFiltersStore";
 import { usePresetsStore } from "@/stores/presetsStore";
@@ -53,7 +54,9 @@ function deriveModalOptions(
 
 export default function SmartFolderModal() {
   const t = useT();
-  const { bridgeBaseUrl, notes, notesScopeKey, onSelectSmartFolderScope } = useDesktopShellContext();
+  const { activeSource, bridgeBaseUrl, notes, notesScopeKey, onSelectSmartFolderScope } =
+    useDesktopShellContext();
+  const workingBaseRef = workingBaseReadOptions(activeSource)?.baseRef;
   const queryClient = useQueryClient();
   const closeModal = useSmartFolderModalStore((state) => state.closeModal);
   const draftName = useSmartFolderModalStore((state) => state.draftName);
@@ -85,7 +88,9 @@ export default function SmartFolderModal() {
       createdAt: state.createdAt,
       linkTypes: state.linkTypes,
       metadataRuleGroups: state.metadataRuleGroups,
+      options: state.options,
       reviewedAt: state.reviewedAt,
+      searchQuery: state.searchQuery,
       selectionEncoding: state.selectionEncoding,
       statuses: state.statuses,
       subjects: state.subjects,
@@ -94,7 +99,6 @@ export default function SmartFolderModal() {
       updatedAt: state.updatedAt,
     })),
   );
-  const currentFilter = buildCurrentSmartFolderFilter(filterFields);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveErrorMessage, setSaveErrorMessage] = useState("");
@@ -112,6 +116,7 @@ export default function SmartFolderModal() {
     : t("smartFolder.modal.descriptionCreate");
 
   const modalOptions = useMemo(() => deriveModalOptions(notes), [notes]);
+  const currentFilter = buildCurrentSmartFolderFilter(filterFields, modalOptions);
 
   const exportFilterOptions = useMemo(
     () => deriveGraphFilterOptionsFromSources(allPagesCache.map((p) => ({
@@ -209,12 +214,16 @@ export default function SmartFolderModal() {
     setIsExporting(true);
     setSaveErrorMessage("");
     try {
-      const result = await exportSubgraph(bridgeBaseUrl, {
-        page_ids: filteredExportPageIds,
-        preset_id: presetId ?? undefined,
-        filter: currentFilter,
-        package_label: exportLabel.trim() || undefined,
-      });
+      const result = await exportSubgraph(
+        bridgeBaseUrl,
+        {
+          page_ids: filteredExportPageIds,
+          preset_id: presetId ?? undefined,
+          filter: currentFilter,
+          package_label: exportLabel.trim() || undefined,
+        },
+        workingBaseRef,
+      );
       setExportDone({ path: result.output_path, page_count: result.page_count });
     } catch (err) {
       setSaveErrorMessage(err instanceof Error ? err.message : t("smartFolder.modal.exportFailed"));

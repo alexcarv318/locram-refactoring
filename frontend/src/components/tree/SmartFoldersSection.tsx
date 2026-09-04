@@ -8,9 +8,9 @@ import { useT } from "@/i18n/useT";
 import type { Translator } from "@/i18n/translate";
 import {
   captureSmartFolderSnapshot,
-  createDefaultGraphFilters,
   deriveGraphFilterOptionsFromSources,
   filterPageSummaries,
+  normalizeGraphFilters,
   type FilterPreset,
 } from "@/lib/graph/filter-state/index";
 import { cn } from "@/lib/utils/cn";
@@ -172,7 +172,8 @@ export default function SmartFoldersSection({ expanded, onExpandedChange, extraA
   }
 
   function handleCreateCustomScope() {
-    const snapshot = captureSmartFolderSnapshot(useGraphFiltersStore.getState());
+    const current = useGraphFiltersStore.getState();
+    const snapshot = captureSmartFolderSnapshot(current);
     const notesOptions = deriveGraphFilterOptionsFromSources(
       notes.map((page) => ({
         type: page.type,
@@ -182,7 +183,7 @@ export default function SmartFoldersSection({ expanded, onExpandedChange, extraA
       })),
     );
     useGraphFiltersStore.setState({
-      ...createDefaultGraphFilters(notesOptions),
+      ...normalizeGraphFilters(current, notesOptions),
       options: notesOptions,
       activePresetId: null,
       activePresetName: null,

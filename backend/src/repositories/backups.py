@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,11 @@ from schemas.backups import BackupRecord, KnowledgeFileStats
 
 
 class BackupRepository(IBackupRepository):
+    _BACKUP_STEM_PATTERN = re.compile(
+        r"^(?P<prefix>\w+)-(?P<trigger>.+)-(?P<created>\d{8}T\d{6}Z)$"
+    )
+    _BACKUP_STEM_WITHOUT_TIMESTAMP = re.compile(r"^(?P<prefix>\w+)-(?P<trigger>.+)$")
+
     def __init__(self, source_path: Path) -> None:
         self.source_path = source_path.expanduser().resolve()
         self.backups_path = self.source_path.parent / "backups"
@@ -21,7 +27,7 @@ class BackupRepository(IBackupRepository):
     def create(self, trigger: str) -> BackupRecord:
         self.backups_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        filename = f"locram-{trigger}-{timestamp}.db"
+        filename = self._backup_filename(self._filename_prefix(), trigger, timestamp)
         destination = self.backups_path / filename
         source_connection = sqlite3.connect(str(self.source_path))
         destination_connection = sqlite3.connect(str(destination))
@@ -40,7 +46,8 @@ class BackupRepository(IBackupRepository):
 
         backups = [
             self._to_record(path)
-            for path in sorted(self.backups_path.glob("locram-*.db"), reverse=True)
+            for path in sorted(self.backups_path.glob("*.db"), reverse=True)
+            if self._is_backup_filename(path.name)
         ]
 
         return backups
@@ -65,15 +72,29 @@ class BackupRepository(IBackupRepository):
     def rename(self, filename: str, new_filename: str) -> BackupRecord:
         self._validate_filename(new_filename)
         source = self.snapshot_path(filename)
-        target = self.snapshot_path(new_filename)
 
         if not source.is_file():
             raise BackupNotFoundError(filename)
 
-        if target.exists():
-            raise BackupExistsError(new_filename)
+        source_prefix, _, source_created_at = self._parse_stem(source.stem)
+        requested_prefix, new_trigger, new_created_at = self._parse_stem(Path(new_filename).stem)
+        created_at = new_created_at
+
+        if created_at == "":
+            created_at = source_created_at
+
+        if created_at == "" or new_trigger == "":
+            raise InvalidBackupFilenameError(new_filename)
+
+        prefix = requested_prefix if requested_prefix != "" else source_prefix
+        resolved_name = self._backup_filename(prefix, new_trigger, created_at)
+        target = self.snapshot_path(resolved_name)
+
+        if target.exists() and target != source:
+            raise BackupExistsError(resolved_name)
 
         source.rename(target)
+
         return self._to_record(target)
 
     def restore(self, snapshot_path: Path) -> BackupRecord:
@@ -158,7 +179,8 @@ class BackupRepository(IBackupRepository):
             connection.close()
 
     def _to_record(self, path: Path) -> BackupRecord:
-        trigger, created_at = self._parse_stem(path.stem)
+        _, trigger, created_at = self._parse_stem(path.stem)
+
         base_id, source_base_id, display_name, page_count, active_page_count, link_count = (
             self._read_metadata(path)
         )
@@ -177,6 +199,35 @@ class BackupRepository(IBackupRepository):
             link_count=link_count,
         )
 
+    def _filename_prefix(self) -> str:
+        display_name = self._read_metadata(self.source_path)[2]
+        raw = (display_name or self.source_path.stem).strip()
+        cleaned = "".join(
+            character if character.isalnum() or character == "_" else "_"
+            for character in raw
+        )
+        compact = "_".join(part for part in cleaned.split("_") if part != "")
+
+        if compact == "":
+            return "locram"
+
+        return compact
+
+    @staticmethod
+    def _backup_filename(prefix: str, trigger: str, created_at: str) -> str:
+        return f"{prefix}-{trigger}-{created_at}.db"
+
+    @staticmethod
+    def _is_backup_filename(filename: str) -> bool:
+        stripped = filename.strip()
+
+        if stripped == "" or Path(stripped).name != stripped or not stripped.endswith(".db"):
+            return False
+
+        prefix, trigger, created_at = BackupRepository._parse_stem(Path(stripped).stem)
+
+        return prefix != "" and trigger != "" and created_at != ""
+
     @staticmethod
     def _validate_filename(filename: str) -> None:
         stripped = filename.strip()
@@ -184,23 +235,27 @@ class BackupRepository(IBackupRepository):
         if stripped == "" or Path(stripped).name != stripped:
             raise InvalidBackupFilenameError(filename)
 
-        if not stripped.startswith("locram-") or not stripped.endswith(".db"):
+        if not stripped.endswith(".db"):
+            raise InvalidBackupFilenameError(filename)
+
+        prefix, trigger, _created_at = BackupRepository._parse_stem(Path(stripped).stem)
+
+        if prefix == "" or trigger == "":
             raise InvalidBackupFilenameError(filename)
 
     @staticmethod
-    def _parse_stem(stem: str) -> tuple[str, str]:
-        prefix = "locram-"
+    def _parse_stem(stem: str) -> tuple[str, str, str]:
+        matched = BackupRepository._BACKUP_STEM_PATTERN.fullmatch(stem)
 
-        if not stem.startswith(prefix):
-            return "unknown", ""
+        if matched is not None:
+            return matched.group("prefix"), matched.group("trigger"), matched.group("created")
 
-        remainder = stem.removeprefix(prefix)
-        parts = remainder.rsplit("-", 1)
+        without_timestamp = BackupRepository._BACKUP_STEM_WITHOUT_TIMESTAMP.fullmatch(stem)
 
-        if len(parts) == 2 and len(parts[1]) == 16 and "T" in parts[1]:
-            return parts[0], parts[1]
+        if without_timestamp is not None:
+            return without_timestamp.group("prefix"), without_timestamp.group("trigger"), ""
 
-        return remainder, ""
+        return "", "unknown", ""
 
     @staticmethod
     def _read_metadata(

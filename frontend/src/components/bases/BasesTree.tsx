@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   backupRecipientBaseShare,
   fetchAccessIdentity,
@@ -102,8 +102,10 @@ type ArtifactTreeItem = {
   edgeCount: number | null;
   artifactId: string | null;
   sourceBaseId: string | null;
+  sourceDisplayName: string | null;
   registeredAt: string;
   source: FileHomeSource;
+  baseRef: string;
   onDelete: () => void;
   deleting: boolean;
 };
@@ -120,12 +122,12 @@ function basesQueryKey(baseUrl: string) {
   return ["bases", baseUrl] as const;
 }
 
-function backupsQueryKey(baseUrl: string) {
-  return ["backups", baseUrl] as const;
+function backupsQueryKey(baseUrl: string, baseRef: string | null) {
+  return ["backups", baseUrl, baseRef] as const;
 }
 
-function exportsQueryKey(baseUrl: string) {
-  return ["exports", baseUrl] as const;
+function exportsQueryKey(baseUrl: string, baseRef: string | null) {
+  return ["exports", baseUrl, baseRef] as const;
 }
 
 function recipientAccountIdFromActorRef(actorRef: string): string | null {
@@ -276,10 +278,6 @@ function sharedBaseSessionStateLabel(
   }
 }
 
-const BASES_TREE_SECTION_EXPANDED_CLASS =
-  "flex min-h-0 flex-1 flex-col overflow-hidden";
-const BASES_TREE_SECTION_BODY_SCROLL_CLASS =
-  "min-h-0 flex-1 overflow-y-auto px-2 py-1";
 const BASES_TREE_CONTENT_SIZED_BODY_SCROLL_CLASS =
   "max-h-44 overflow-y-auto px-2 py-1";
 
@@ -322,7 +320,7 @@ function localBaseInspectSourceForSharedGrant(
   };
 }
 
-function fileHomeSourceFromExport(exp: ExportSummary): FileHomeSource {
+function fileHomeSourceFromExport(exp: ExportSummary, sourceBaseRef: string): FileHomeSource {
   return {
     kind: "file-home",
     id: `export:${exp.path}`,
@@ -332,6 +330,7 @@ function fileHomeSourceFromExport(exp: ExportSummary): FileHomeSource {
     sizeBytes: exp.size_bytes,
     subjectKind: "export_artifact",
     managementScope: "managed_export",
+    sourceBaseRef,
   };
 }
 
@@ -357,9 +356,10 @@ function deriveBackupPath(
 
 function fileHomeSourceFromBackup(
   backup: BackupSummary,
-  activeBasePath: string | null | undefined,
+  sourceBasePath: string | null | undefined,
+  sourceBaseRef: string,
 ): FileHomeSource | null {
-  const backupPath = deriveBackupPath(backup, activeBasePath);
+  const backupPath = deriveBackupPath(backup, sourceBasePath);
   if (!backupPath) {
     return null;
   }
@@ -372,12 +372,17 @@ function fileHomeSourceFromBackup(
     sizeBytes: backup.size_bytes,
     subjectKind: "backup_artifact",
     managementScope: "managed_backup",
+    sourceBaseRef,
   };
 }
 
-function artifactTreeItemFromExport(exp: ExportSummary): ArtifactTreeItem {
+function artifactTreeItemFromExport(
+  exp: ExportSummary,
+  baseRef: string,
+  sourceDisplayName: string | null,
+): ArtifactTreeItem {
   return {
-    key: `export:${exp.filename}`,
+    key: `export:${exp.path}`,
     kindLabel: "scoped export",
     label: exp.package_label ?? exp.filename,
     path: exp.path,
@@ -386,8 +391,10 @@ function artifactTreeItemFromExport(exp: ExportSummary): ArtifactTreeItem {
     edgeCount: exp.link_count,
     artifactId: exp.artifact_id,
     sourceBaseId: exp.source_base_id,
+    sourceDisplayName,
     registeredAt: exp.created_at,
-    source: fileHomeSourceFromExport(exp),
+    source: fileHomeSourceFromExport(exp, baseRef),
+    baseRef,
     onDelete: () => undefined,
     deleting: false,
   };
@@ -395,14 +402,16 @@ function artifactTreeItemFromExport(exp: ExportSummary): ArtifactTreeItem {
 
 function artifactTreeItemFromBackup(
   backup: BackupSummary,
-  activeBasePath: string | null | undefined,
+  sourceBasePath: string | null | undefined,
+  baseRef: string,
+  sourceDisplayName: string | null,
 ): ArtifactTreeItem | null {
-  const source = fileHomeSourceFromBackup(backup, activeBasePath);
+  const source = fileHomeSourceFromBackup(backup, sourceBasePath, baseRef);
   if (!source) {
     return null;
   }
   return {
-    key: `backup:${backup.filename}`,
+    key: `backup:${source.path}`,
     kindLabel: "backup",
     label: backup.filename,
     path: source.path,
@@ -411,8 +420,10 @@ function artifactTreeItemFromBackup(
     edgeCount: backup.link_count ?? null,
     artifactId: backup.artifact_id ?? null,
     sourceBaseId: backup.source_base_id ?? null,
+    sourceDisplayName: backup.display_name ?? sourceDisplayName,
     registeredAt: backup.created_at,
     source,
+    baseRef,
     onDelete: () => undefined,
     deleting: false,
   };
@@ -440,15 +451,10 @@ export default function BasesTree() {
   );
 
   const [bases, setBases] = useState<BaseRegistryEntry[]>([]);
-  const [backups, setBackups] = useState<BackupSummary[]>([]);
-  const [exports, setExports] = useState<ExportSummary[]>([]);
   const [isLoadingBases, setIsLoadingBases] = useState(false);
-  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
-  const [isLoadingExports, setIsLoadingExports] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [isLocalExpanded, setIsLocalExpanded] = useState(true);
   const [isBasesExpanded, setIsBasesExpanded] = useState(true);
   const [isSharedWithMeExpanded, setIsSharedWithMeExpanded] = useState(false);
   const [isBuiltInExpanded, setIsBuiltInExpanded] = useState(false);
@@ -531,16 +537,28 @@ export default function BasesTree() {
     queryFn: () => fetchBases(bridgeBaseUrl),
     refetchInterval: 30_000,
   });
-  const backupsRegistryQuery = useQuery({
-    enabled: bridgeBaseUrl.length > 0 && isArtifactsExpanded,
-    queryKey: backupsQueryKey(bridgeBaseUrl),
-    queryFn: () => fetchBackups(bridgeBaseUrl),
+  const backupsQueries = useQueries({
+    queries: bases.map((entry) => {
+      const baseRef = `local:${entry.entry_id}`;
+      return {
+        enabled: bridgeBaseUrl.length > 0,
+        queryKey: backupsQueryKey(bridgeBaseUrl, baseRef),
+        queryFn: () => fetchBackups(bridgeBaseUrl, baseRef),
+      };
+    }),
   });
-  const exportsRegistryQuery = useQuery({
-    enabled: bridgeBaseUrl.length > 0 && isArtifactsExpanded && exportArtifactsVisible,
-    queryKey: exportsQueryKey(bridgeBaseUrl),
-    queryFn: () => fetchExports(bridgeBaseUrl),
+  const exportsQueries = useQueries({
+    queries: bases.map((entry) => {
+      const baseRef = `local:${entry.entry_id}`;
+      return {
+        enabled: bridgeBaseUrl.length > 0 && exportArtifactsVisible,
+        queryKey: exportsQueryKey(bridgeBaseUrl, baseRef),
+        queryFn: () => fetchExports(bridgeBaseUrl, baseRef),
+      };
+    }),
   });
+  const isLoadingBackups = backupsQueries.some((query) => query.isLoading);
+  const isLoadingExports = exportsQueries.some((query) => query.isLoading);
 
   useEffect(() => {
     void loadBases();
@@ -594,32 +612,10 @@ export default function BasesTree() {
       return;
     }
     if (activeSource?.kind === "local-base") {
-      setIsLocalExpanded(true);
       setIsBasesExpanded(true);
       setSelectedLocalBaseEntryId((current) => current ?? activeSource.entryId);
     }
   }, [activeSource]);
-
-  useEffect(() => {
-    if (backupsRegistryQuery.data) {
-      setBackups(backupsRegistryQuery.data);
-    }
-  }, [backupsRegistryQuery.data]);
-
-  useEffect(() => {
-    if (exportsRegistryQuery.data) {
-      setExports(exportsRegistryQuery.data);
-    }
-  }, [exportsRegistryQuery.data]);
-
-  useEffect(() => {
-    if (isArtifactsExpanded) {
-      void loadBackups();
-      if (exportArtifactsVisible) {
-        void loadExports();
-      }
-    }
-  }, [exportArtifactsVisible, isArtifactsExpanded, bridgeBaseUrl]);
 
   async function loadBases() {
     setIsLoadingBases(true);
@@ -637,36 +633,28 @@ export default function BasesTree() {
     }
   }
 
-  async function loadBackups() {
-    setIsLoadingBackups(true);
-    try {
-      const items = await fetchBackups(bridgeBaseUrl);
-      setBackups(items);
-      queryClient.setQueryData(backupsQueryKey(bridgeBaseUrl), items);
-    } finally {
-      setIsLoadingBackups(false);
+  async function refreshArtifactLists(baseRef?: string) {
+    if (baseRef !== undefined) {
+      await queryClient.invalidateQueries({
+        queryKey: backupsQueryKey(bridgeBaseUrl, baseRef),
+      });
+      if (exportArtifactsVisible) {
+        await queryClient.invalidateQueries({
+          queryKey: exportsQueryKey(bridgeBaseUrl, baseRef),
+        });
+      }
+      return;
     }
-  }
 
-  async function loadExports() {
-    setIsLoadingExports(true);
-    try {
-      const items = await fetchExports(bridgeBaseUrl);
-      setExports(items);
-      queryClient.setQueryData(exportsQueryKey(bridgeBaseUrl), items);
-    } finally {
-      setIsLoadingExports(false);
+    await queryClient.invalidateQueries({ queryKey: ["backups", bridgeBaseUrl] });
+    if (exportArtifactsVisible) {
+      await queryClient.invalidateQueries({ queryKey: ["exports", bridgeBaseUrl] });
     }
   }
 
   async function refreshLocalSources() {
     await loadBases();
-    if (isArtifactsExpanded) {
-      await loadBackups();
-      if (exportArtifactsVisible) {
-        await loadExports();
-      }
-    }
+    await refreshArtifactLists();
   }
 
   function copyToClipboard(value: string, id: string) {
@@ -1039,15 +1027,10 @@ export default function BasesTree() {
         throw new Error(t("bases.error.baseNotFound"));
       }
       await ensureShellActiveBase(entry);
-      await createBackup(bridgeBaseUrl, "manual");
-      if (!isLocalExpanded) {
-        setIsLocalExpanded(true);
-      }
-      if (!isArtifactsExpanded) {
-        setIsArtifactsExpanded(true);
-      } else {
-        await loadBackups();
-      }
+      const baseRef = `local:${entryId}`;
+      await createBackup(bridgeBaseUrl, "manual", baseRef);
+      setIsArtifactsExpanded(true);
+      await refreshArtifactLists(baseRef);
       await loadBases();
     } catch (err) {
       setErrorMessage(
@@ -1058,12 +1041,12 @@ export default function BasesTree() {
     }
   }
 
-  async function handleDeleteBackup(filename: string) {
+  async function handleDeleteBackup(filename: string, baseRef: string) {
     setIsSubmitting(true);
     try {
-      await deleteBackup(bridgeBaseUrl, filename);
+      await deleteBackup(bridgeBaseUrl, filename, baseRef);
       setDeletingBackup(null);
-      await loadBackups();
+      await refreshArtifactLists(baseRef);
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : t("bases.error.deleteBackup"),
@@ -1073,12 +1056,12 @@ export default function BasesTree() {
     }
   }
 
-  async function handleDeleteExport(filename: string) {
+  async function handleDeleteExport(filename: string, baseRef: string) {
     setIsSubmitting(true);
     try {
-      await deleteExport(bridgeBaseUrl, filename);
+      await deleteExport(bridgeBaseUrl, filename, baseRef);
       setDeletingExport(null);
-      await loadExports();
+      await refreshArtifactLists(baseRef);
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : t("bases.error.deleteExport"),
@@ -1926,10 +1909,10 @@ export default function BasesTree() {
               onClick={(event) => {
                 event?.stopPropagation();
                 if (item.kindLabel === "backup") {
-                  setDeletingBackup(item.filename);
+                  setDeletingBackup(item.path);
                   return;
                 }
-                setDeletingExport(item.filename);
+                setDeletingExport(item.path);
               }}
               title={deleteLabel}
             />
@@ -1960,13 +1943,19 @@ export default function BasesTree() {
                     copyId: `artifact_id_${item.key}`,
                   }
                 : null,
-              item.sourceBaseId
+              item.sourceDisplayName
                 ? {
-                    label: t("bases.detail.sourceBaseId"),
-                    value: item.sourceBaseId,
-                    copyId: `artifact_source_${item.key}`,
+                    label: t("bases.detail.sourceBase"),
+                    value: item.sourceDisplayName,
+                    copyId: `artifact_source_base_${item.key}`,
                   }
-                : null,
+                : item.sourceBaseId
+                  ? {
+                      label: t("bases.detail.sourceBaseId"),
+                      value: item.sourceBaseId,
+                      copyId: `artifact_source_${item.key}`,
+                    }
+                  : null,
               {
                 label: t("bases.detail.registered"),
                 value: item.registeredAt,
@@ -2060,30 +2049,54 @@ export default function BasesTree() {
     <p className="text-text-secondary px-2 py-4 text-center text-xs">No local bases registered yet.</p>
   );
 
-  const artifactRows = [
-    ...backups
-      .map((backup) => artifactTreeItemFromBackup(backup, basesRegistryQuery.data?.active_base?.path ?? null))
-      .filter((item): item is ArtifactTreeItem => item !== null)
-      .map((item) => ({
-        ...item,
-        deleting: deletingBackup === item.filename,
-        onDelete: () => void handleDeleteBackup(item.filename),
-      })),
-    ...exports.map((exp) => ({
-      ...artifactTreeItemFromExport(exp),
-      deleting: deletingExport === exp.filename,
-      onDelete: () => void handleDeleteExport(exp.filename),
-    })),
-  ].sort((left, right) => right.registeredAt.localeCompare(left.registeredAt));
+  const artifactRows = (() => {
+    const seenPaths = new Set<string>();
+    const rows: ArtifactTreeItem[] = [];
+
+    bases.forEach((entry, index) => {
+      const baseRef = `local:${entry.entry_id}`;
+      const displayName = entry.display_name ?? null;
+
+      for (const backup of backupsQueries[index]?.data ?? []) {
+        const item = artifactTreeItemFromBackup(backup, entry.path, baseRef, displayName);
+        if (item === null || seenPaths.has(item.path)) {
+          continue;
+        }
+        seenPaths.add(item.path);
+        rows.push({
+          ...item,
+          deleting: deletingBackup === item.path,
+          onDelete: () => void handleDeleteBackup(item.filename, item.baseRef),
+        });
+      }
+
+      if (!exportArtifactsVisible) {
+        return;
+      }
+
+      for (const exp of exportsQueries[index]?.data ?? []) {
+        const item = artifactTreeItemFromExport(exp, baseRef, displayName);
+        if (seenPaths.has(item.path)) {
+          continue;
+        }
+        seenPaths.add(item.path);
+        rows.push({
+          ...item,
+          deleting: deletingExport === item.path,
+          onDelete: () => void handleDeleteExport(item.filename, item.baseRef),
+        });
+      }
+    });
+
+    return rows.sort((left, right) => right.registeredAt.localeCompare(left.registeredAt));
+  })();
 
   const builtInBases = basesRegistryQuery.data?.built_in_bases ?? [];
 
-  const localBasesClaimsMainPane = isLocalExpanded && isBasesExpanded;
-
   return (
-    <div className="bg-panel-background flex h-full min-h-0 flex-col overflow-hidden pb-2">
+    <div className="bg-panel-background flex h-full min-h-0 flex-col pb-2">
       {errorMessage && (
-        <div className="border-destructive/30 bg-destructive/10 text-destructive mx-2 mt-1 rounded-md px-2 py-1.5 text-xs">
+        <div className="border-destructive/30 bg-destructive/10 text-destructive mx-2 mt-1 shrink-0 rounded-md px-2 py-1.5 text-xs">
           {errorMessage}
           <button
             type="button"
@@ -2094,76 +2107,47 @@ export default function BasesTree() {
           </button>
         </div>
       )}
-      <div
-        className={cn(
-          isLocalExpanded ? BASES_TREE_SECTION_EXPANDED_CLASS : "shrink-0",
-        )}
-      >
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <TreeHeader
-          title={t("bases.section.local")}
-          expanded={isLocalExpanded}
-          onToggle={() => setIsLocalExpanded((prev) => !prev)}
+          title={t("bases.section.bases")}
+          expanded={isBasesExpanded}
+          onToggle={() => setIsBasesExpanded((prev) => !prev)}
           actions={localHeaderActions}
         >
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden ps-3">
-            <div
-              className={cn(
-                localBasesClaimsMainPane
-                  ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-                  : "shrink-0",
-              )}
-            >
-              <TreeHeader
-                title={t("bases.section.bases")}
-                expanded={isBasesExpanded}
-                onToggle={() => setIsBasesExpanded((prev) => !prev)}
-                uppercaseTitle={false}
-              >
-                <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
-                  {multiBaseUsable && creatingMode === "new" && (
-                    <div className="mb-2">
-                      <InlineItemEditor
-                        initialValue=""
-                        placeholder={t("bases.placeholder.baseDisplayName")}
-                        onConfirm={handleCreateNew}
-                        onCancel={() => setCreatingMode(null)}
-                        isSubmitting={isSubmitting}
-                        icon={<DatabaseIcon className="h-3.5 w-3.5" />}
-                      />
-                    </div>
-                  )}
-                  {bases.length === 0 ? emptyBasesContent : bases.map((entry) => renderBase(entry))}
-                </div>
-              </TreeHeader>
-            </div>
+          <div className={BASES_TREE_CONTENT_SIZED_BODY_SCROLL_CLASS}>
+            {multiBaseUsable && creatingMode === "new" && (
+              <div className="mb-2">
+                <InlineItemEditor
+                  initialValue=""
+                  placeholder={t("bases.placeholder.baseDisplayName")}
+                  onConfirm={handleCreateNew}
+                  onCancel={() => setCreatingMode(null)}
+                  isSubmitting={isSubmitting}
+                  icon={<DatabaseIcon className="h-3.5 w-3.5" />}
+                />
+              </div>
+            )}
+            {bases.length === 0 ? emptyBasesContent : bases.map((entry) => renderBase(entry))}
+          </div>
+        </TreeHeader>
+      </div>
 
-            <div className="shrink-0">
-              <TreeHeader
-                title={t("bases.section.artifacts")}
-                expanded={isArtifactsExpanded}
-                onToggle={() => setIsArtifactsExpanded((prev) => !prev)}
-                uppercaseTitle={false}
-              >
-                <div
-                  className={cn(
-                    "px-2 py-1",
-                    isArtifactsExpanded
-                      ? "min-h-0 max-h-44 overflow-y-auto"
-                      : undefined,
-                  )}
-                >
-              {isLoadingBackups || (exportArtifactsVisible && isLoadingExports) ? (
-                    <p className="text-text-secondary px-2 py-4 text-center text-xs">
-                      {t("common.loading")}
-                    </p>
-                  ) : artifactRows.length === 0 ? (
-                    <p className="text-text-secondary px-2 py-4 text-center text-xs">No artifacts found.</p>
-                  ) : (
-                    artifactRows.map((item) => renderArtifact(item))
-                  )}
-                </div>
-              </TreeHeader>
-            </div>
+      <div className="shrink-0">
+        <TreeHeader
+          title={t("bases.section.artifacts")}
+          expanded={isArtifactsExpanded}
+          onToggle={() => setIsArtifactsExpanded((prev) => !prev)}
+        >
+          <div className={BASES_TREE_CONTENT_SIZED_BODY_SCROLL_CLASS}>
+            {isLoadingBackups || (exportArtifactsVisible && isLoadingExports) ? (
+              <p className="text-text-secondary px-2 py-4 text-center text-xs">
+                {t("common.loading")}
+              </p>
+            ) : artifactRows.length === 0 ? (
+              <p className="text-text-secondary px-2 py-4 text-center text-xs">No artifacts found.</p>
+            ) : (
+              artifactRows.map((item) => renderArtifact(item))
+            )}
           </div>
         </TreeHeader>
       </div>
@@ -2287,7 +2271,7 @@ export default function BasesTree() {
       <RegisterExistingBaseModal
         bridgeBaseUrl={bridgeBaseUrl}
         onOpened={() => {
-          setIsLocalExpanded(true);
+          setIsBasesExpanded(true);
           setIsArtifactsExpanded(true);
         }}
       />

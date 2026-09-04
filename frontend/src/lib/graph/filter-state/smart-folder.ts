@@ -1,5 +1,6 @@
 import { cloneGraphFilters } from "./contract";
-import type { GraphFiltersState } from "./contract";
+import type { GraphFilterOptions, GraphFiltersState } from "./contract";
+import { isSelectionNarrowed, normalizeGraphFilters } from "./options";
 import type { GraphFiltersStoreState } from "./store-contract";
 
 export type SmartFolderFilterSnapshot = {
@@ -9,13 +10,19 @@ export type SmartFolderFilterSnapshot = {
   activePresetFilter: GraphFiltersState | null;
 };
 
+function persistSelection(selectedValues: string[], availableValues: string[]) {
+  return isSelectionNarrowed(selectedValues, availableValues) ? [...selectedValues] : [];
+}
+
 export function buildCurrentSmartFolderFilter(
   state: Pick<
     GraphFiltersStoreState,
     | "createdAt"
     | "linkTypes"
     | "metadataRuleGroups"
+    | "options"
     | "reviewedAt"
+    | "searchQuery"
     | "selectionEncoding"
     | "statuses"
     | "subjects"
@@ -23,18 +30,22 @@ export function buildCurrentSmartFolderFilter(
     | "types"
     | "updatedAt"
   >,
+  optionsOverride?: GraphFilterOptions,
 ): GraphFiltersState {
+  const options = optionsOverride ?? state.options;
+  const normalized = normalizeGraphFilters(state, options);
+
   return {
-    selectionEncoding: state.selectionEncoding ?? "legacy-unrestricted-empty",
-    searchQuery: "",
-    types: [...state.types],
-    statuses: [...state.statuses],
-    subjects: [...state.subjects],
-    tags: [...state.tags],
-    metadataRuleGroups: state.metadataRuleGroups.map((group) => ({
+    selectionEncoding: "explicit",
+    searchQuery: normalized.searchQuery,
+    types: persistSelection(normalized.types, options.types),
+    statuses: persistSelection(normalized.statuses, options.statuses),
+    subjects: persistSelection(normalized.subjects, options.subjects),
+    tags: persistSelection(normalized.tags, options.tags),
+    metadataRuleGroups: normalized.metadataRuleGroups.map((group) => ({
       id: group.id,
       joiner: group.joiner,
-      negated: group.negated,
+      negated: Boolean(group.negated),
       rules: group.rules.map((rule) => ({
         id: rule.id,
         field: rule.field,
@@ -42,10 +53,10 @@ export function buildCurrentSmartFolderFilter(
         values: [...rule.values],
       })),
     })),
-    linkTypes: [...state.linkTypes],
-    createdAt: { ...state.createdAt },
-    updatedAt: { ...state.updatedAt },
-    reviewedAt: { ...state.reviewedAt },
+    linkTypes: persistSelection(normalized.linkTypes, options.linkTypes),
+    createdAt: { ...normalized.createdAt },
+    updatedAt: { ...normalized.updatedAt },
+    reviewedAt: { ...normalized.reviewedAt },
   };
 }
 

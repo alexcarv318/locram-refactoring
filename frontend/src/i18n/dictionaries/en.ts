@@ -781,6 +781,7 @@ export const en = {
   "bases.detail.entryId": "entry_id",
   "bases.detail.grantId": "grant_id",
   "bases.detail.artifactId": "artifact_id",
+  "bases.detail.sourceBase": "source base",
   "bases.detail.sourceBaseId": "source_base_id",
   "bases.detail.registered": "registered",
   "bases.detail.created": "created",

@@ -62,6 +62,7 @@ export type FileHomeSource = {
   sizeBytes?: number | null;
   subjectKind: FileHomeSubjectKind;
   managementScope: FileHomeManagementScope;
+  sourceBaseRef?: string;
 };
 
 export type ActiveSource =
