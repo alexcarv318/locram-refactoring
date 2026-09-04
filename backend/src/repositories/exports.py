@@ -268,11 +268,22 @@ class ExportRepository(IExportRepository):
             return self._unreadable(path, "Missing required tables (pages or links)")
 
         base_row = None
+        base_created_at = None
 
         if "base_metadata" in tables:
-            base_row = connection.execute(
-                "SELECT base_id, display_name FROM base_metadata LIMIT 1"
-            ).fetchone()
+            base_columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(base_metadata)")
+            }
+
+            if "created_at" in base_columns:
+                base_row = connection.execute(
+                    "SELECT base_id, display_name, created_at FROM base_metadata LIMIT 1"
+                ).fetchone()
+                base_created_at = self._column_text(base_row, 2)
+            else:
+                base_row = connection.execute(
+                    "SELECT base_id, display_name FROM base_metadata LIMIT 1"
+                ).fetchone()
 
         artifact_row = None
 
@@ -299,6 +310,17 @@ class ExportRepository(IExportRepository):
         package_label = self._column_text(artifact_row, 3)
         created_at = self._column_text(artifact_row, 4)
 
+        if created_at is None:
+            created_at = base_created_at
+
+        if created_at is None:
+            created_at = self._earliest_page_created_at(connection)
+
+        if created_at is None:
+            created_at = datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
         if artifact_kind == "export":
             artifact_class = "scoped_export"
             valid_actions = ["register_as_base", "merge_into_active"]
@@ -318,7 +340,7 @@ class ExportRepository(IExportRepository):
         else:
             artifact_class = "ordinary_base"
             valid_actions = ["register_as_base", "merge_into_active", "restore"]
-            coverage = None
+            coverage = "sidecar_files"
             provenance = f"ordinary locram base {base_id or 'unknown'}"
             summary = (
                 f"Ordinary locram base ({display_name or base_id or 'unknown'}): "
@@ -444,6 +466,18 @@ class ExportRepository(IExportRepository):
             errors=[error],
             summary="Incompatible or unreadable file",
         )
+
+    @staticmethod
+    def _earliest_page_created_at(connection: sqlite3.Connection) -> str | None:
+        row = connection.execute(
+            """
+            SELECT MIN(created_at)
+            FROM pages
+            WHERE created_at IS NOT NULL AND created_at != ''
+            """
+        ).fetchone()
+
+        return ExportRepository._column_text(row, 0)
 
     @staticmethod
     def _count(connection: sqlite3.Connection, statement: str) -> int:

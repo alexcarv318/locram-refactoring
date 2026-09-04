@@ -1,19 +1,21 @@
 import asyncio
 import base64
+import binascii
 import json
 import platform
 import secrets
 import threading
 from datetime import UTC, datetime
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 
-from exceptions.access import AccessError
+from exceptions.access import AccessError, EditionCapabilityError, TransferRequiredError
 from interfaces.repositories.access import IAccessRepository
 from interfaces.services.access import AccessHttpClient, IAccessRelay, IAccessService
 from schemas.access import (
@@ -36,9 +38,11 @@ from schemas.access import (
     BrokerEnrollResponse,
     BrokerErrorBody,
     BrokerItemsResponse,
+    BrokerLeaseRefreshResponse,
     BrokerSessionItemsResponse,
     ConnectedOAuthSession,
     DesktopActivationAttemptRecord,
+    DesktopCapability,
     InviteMintRequest,
     PendingAuthorizationRequest,
     ProductActivationRedemption,
@@ -54,10 +58,14 @@ from schemas.access import (
     RelayStreamEnd,
     RelayStreamMeta,
     ResolvedBaseShareSession,
+    SignedEntitlementLease,
 )
 from schemas.bridge import (
     DesktopActivationAttempt,
     DesktopActivationStatus,
+    DesktopEditionCapabilities,
+    DesktopEditionStatus,
+    DesktopEntitlementLeaseStatus,
     DesktopUsableCapabilities,
 )
 from schemas.sharing import ShareGrantPermission, ShareInvite, ShareTransportEnvelope
@@ -435,6 +443,11 @@ class AccessService(IAccessService):
         if activation_session_id != "":
             request_body["activation_session_id"] = activation_session_id
 
+        transfer_session_id = (payload.transfer_session_id or "").strip()
+
+        if transfer_session_id != "":
+            request_body["transfer_session_id"] = transfer_session_id
+
         if machine_label != "":
             request_body["machine_label"] = machine_label
 
@@ -470,8 +483,13 @@ class AccessService(IAccessService):
         }
 
         for field_name, field_value in optional_enrollment.items():
-            if field_value is not None and field_value.strip() != "":
-                enrollment_data[field_name] = field_value.strip()
+            if field_value is None:
+                continue
+
+            text = str(field_value).strip()
+
+            if text != "":
+                enrollment_data[field_name] = text
 
         if enrolled.account_identity is not None:
             if enrolled.account_identity.email:
@@ -485,33 +503,101 @@ class AccessService(IAccessService):
             if enrolled.account_identity.account_id:
                 enrollment_data["account_id"] = enrolled.account_identity.account_id.strip()
 
+        credential_data = {
+            "relay_token": enrolled.relay_token,
+            self._settings.connected_proxy_secret_field: secrets.token_urlsafe(32),
+            "client_private_key_pem": private_key_pem,
+            "client_public_key": public_key,
+            "key_algorithm": "ed25519",
+        }
+
+        if enrolled.entitlement_lease is not None:
+            self._store_entitlement_lease_from_response(credential_data, response.text)
+
         record = AccessCredentialRecord(
             mode=AccessMode.MANAGED_PUBLIC,
             identity=enrolled.device_id,
             access_url=access_url,
             enrollment_data=enrollment_data,
-            credential_data={
-                "relay_token": enrolled.relay_token,
-                self._settings.connected_proxy_secret_field: secrets.token_urlsafe(32),
-                "client_private_key_pem": private_key_pem,
-                "client_public_key": public_key,
-                "key_algorithm": "ed25519",
-            },
+            credential_data=credential_data,
             updated_at=self._now(),
         )
         self._access_repository.save(record)
         return self.summary()
 
     def desktop_activation_status(self) -> DesktopActivationStatus:
+        self._refresh_entitlement_lease()
         return self._desktop_activation_status()
 
-    def start_or_continue_desktop_activation(self, machine_label: str | None) -> DesktopActivationStatus:
+    def desktop_edition(self) -> DesktopEditionStatus:
+        status = self.desktop_activation_status()
+
+        return DesktopEditionStatus(
+            edition=status.edition,
+            product_name=status.product_name,
+            capabilities=self._edition_capabilities(status.edition),
+        )
+
+    def has_capability(self, capability: DesktopCapability) -> bool:
+        usable = self._current_usable_capabilities()
+        capabilities = {
+            DesktopCapability.MULTI_BASE: usable.multi_base,
+            DesktopCapability.SHARE_BASE: usable.share_base,
+            DesktopCapability.MANAGED_PUBLIC_MCP: usable.managed_public_mcp,
+            DesktopCapability.LOCAL_MCP_TOOL_VISIBILITY: usable.local_mcp_tool_visibility,
+            DesktopCapability.AGENT_BASE_ADMINISTRATION: usable.agent_base_administration,
+            DesktopCapability.DOCS_GGL_UPDATES: usable.docs_ggl_updates,
+            DesktopCapability.MANAGED_UPDATES: usable.managed_updates,
+        }
+
+        return capabilities[capability]
+
+    def deny_without_capability(self, capability: DesktopCapability) -> None:
+        if self.has_capability(capability):
+            return
+
+        raise EditionCapabilityError(capability.value)
+
+    def start_or_continue_desktop_activation(
+        self,
+        machine_label: str | None,
+    ) -> DesktopActivationStatus:
         last_attempt = self._load_activation_attempt()
+
+        if last_attempt is not None and self._is_ready_to_enroll_transfer(last_attempt):
+            return self._enroll_pending_transfer(last_attempt)
 
         if last_attempt is not None and self._is_pending_activation(last_attempt):
             return self._redeem_desktop_activation(last_attempt)
 
         return self._start_desktop_activation(machine_label)
+
+    def sign_out(self) -> DesktopActivationStatus:
+        self._access_relay.stop()
+        record = self._access_repository.load()
+
+        if record is not None:
+            record.credential_data = {}
+            record.updated_at = self._now()
+            self._access_repository.save(record)
+
+        self._access_repository.save_activation_attempt(
+            DesktopActivationAttemptRecord(
+                state="signed_out",
+                observed_at=self._now(),
+                message="Signed out.",
+                retryable=True,
+            )
+        )
+
+        return self._desktop_activation_status()
+
+    def forget_device(self) -> DesktopActivationStatus:
+        self._access_relay.stop()
+        self._access_repository.clear()
+        self._access_repository.clear_activation_attempt()
+
+        return self._desktop_activation_status()
 
     def connect(self) -> AccessRuntimeResponse:
         record = self._access_repository.load()
@@ -531,6 +617,14 @@ class AccessService(IAccessService):
         if self._access_relay.running():
             return self._runtime_response("already_running", None)
 
+        self._refresh_entitlement_lease()
+
+        if not self.has_capability(DesktopCapability.MANAGED_PUBLIC_MCP):
+            return self._runtime_response(
+                "network_unavailable",
+                "Pro is required for managed public MCP.",
+            )
+
         self._access_relay.start(record)
         return self._runtime_response("started", None)
 
@@ -547,6 +641,14 @@ class AccessService(IAccessService):
             return self._runtime_response(
                 "reauth_required",
                 "Sign in again to restore this desktop session.",
+            )
+
+        self._refresh_entitlement_lease()
+
+        if not self.has_capability(DesktopCapability.MANAGED_PUBLIC_MCP):
+            return self._runtime_response(
+                "network_unavailable",
+                "Pro is required for managed public MCP.",
             )
 
         self._access_relay.stop()
@@ -601,6 +703,19 @@ class AccessService(IAccessService):
         if status.runtime_running and status.state is AccessState.LIVE:
             return AccessRecoverResult(
                 status=status,
+                recovery=RecoveryGuidance(
+                    recommended_action=RecoveryAction.NONE,
+                    available_actions=[],
+                    requires_redemption_code=False,
+                ),
+                reaction=RecoverReaction(kind=RecoverReactionKind.NONE),
+            )
+
+        self._refresh_entitlement_lease()
+
+        if not self.has_capability(DesktopCapability.MANAGED_PUBLIC_MCP):
+            return AccessRecoverResult(
+                status=self._status(record),
                 recovery=RecoveryGuidance(
                     recommended_action=RecoveryAction.NONE,
                     available_actions=[],
@@ -689,6 +804,8 @@ class AccessService(IAccessService):
         if raw_input == "":
             raise AccessError("input is required")
 
+        self.deny_without_capability(DesktopCapability.SHARE_BASE)
+
         envelope = self._parse_invite_input(raw_input, payload.expected_broker_base_url)
         accepted_at = self._now()
         existing = self._access_repository.get_accepted_share(envelope.base_share_grant_id)
@@ -736,6 +853,7 @@ class AccessService(IAccessService):
         )
 
     def mint_invite(self, payload: InviteMintRequest) -> ShareInvite:
+        self.deny_without_capability(DesktopCapability.SHARE_BASE)
         record = self._enrolled_record()
         device_id = record.identity
 
@@ -971,7 +1089,10 @@ class AccessService(IAccessService):
             DesktopActivationAttemptRecord(
                 state="pending",
                 observed_at=self._now(),
-                message="Browser activation required. Open the activation link, sign in, then return here.",
+                message=(
+                    "Browser activation required. Open the activation link, "
+                    "sign in, then return here."
+                ),
                 retryable=True,
                 activation_session_id=session.activation_session_id,
                 activation_secret=session.activation_secret,
@@ -1029,16 +1150,73 @@ class AccessService(IAccessService):
             )
             return self._desktop_activation_status()
 
-        self.enroll(
-            AccessEnrollRequest(
-                account_entitlement_token=token,
-                activation_session_id=last_attempt.activation_session_id,
-                broker_base_url=broker_base_url,
-                machine_label=last_attempt.machine_label,
-                client_public_key=last_attempt.client_public_key,
-                client_private_key_pem=last_attempt.client_private_key_pem,
+        try:
+            self.enroll(
+                AccessEnrollRequest(
+                    account_entitlement_token=token,
+                    activation_session_id=last_attempt.activation_session_id,
+                    broker_base_url=broker_base_url,
+                    machine_label=last_attempt.machine_label,
+                    client_public_key=last_attempt.client_public_key,
+                    client_private_key_pem=last_attempt.client_private_key_pem,
+                )
             )
+        except TransferRequiredError as error:
+            self._save_pending_transfer(
+                last_attempt,
+                token,
+                broker_base_url,
+                error.transfer_session_id,
+            )
+            return self._desktop_activation_status()
+
+        return self._finish_desktop_activation()
+
+    def _desktop_activation_status(self) -> DesktopActivationStatus:
+        record = self._access_repository.load()
+        attempt = self._load_activation_attempt()
+        identity = self._account_identity(record)
+        has_credentials = record is not None and self._has_credentials(record)
+        signed_out = attempt is not None and attempt.state == "signed_out"
+        state = "free"
+
+        if has_credentials:
+            state = "active"
+        elif attempt is not None and attempt.state == "pending":
+            state = "not_activated"
+        elif signed_out:
+            state = "signed_out"
+        elif identity is not None:
+            state = "reauth_required"
+
+        lease = (
+            None
+            if signed_out or not has_credentials
+            else self._entitlement_lease_status(record)
         )
+        edition = self._edition_from_lease(lease)
+        usable = self._usable_capabilities(edition)
+        last_attempt = None if signed_out else self._public_activation_attempt(attempt)
+
+        return DesktopActivationStatus(
+            edition=edition,
+            product_name="Locram",
+            state=state,
+            activation_required=not has_credentials,
+            broker_enrollment_available=True,
+            network_features_usable=usable.managed_public_mcp,
+            usable_capabilities=usable,
+            last_attempt=last_attempt,
+            entitlement_lease=lease,
+        )
+
+    def _load_activation_attempt(self) -> DesktopActivationAttemptRecord | None:
+        try:
+            return self._access_repository.load_activation_attempt()
+        except ValidationError:
+            return None
+
+    def _finish_desktop_activation(self) -> DesktopActivationStatus:
         self._access_repository.save_activation_attempt(
             DesktopActivationAttemptRecord(
                 state="succeeded",
@@ -1050,42 +1228,66 @@ class AccessService(IAccessService):
         self.connect()
         return self._desktop_activation_status()
 
-    def _desktop_activation_status(self) -> DesktopActivationStatus:
-        record = self._access_repository.load()
-        attempt = self._load_activation_attempt()
-        identity = self._account_identity(record)
-        state = "free"
-
-        if identity is not None and record is not None and self._has_credentials(record):
-            state = "active"
-        elif attempt is not None and attempt.state == "pending":
-            state = "not_activated"
-
-        return DesktopActivationStatus(
-            edition="free",
-            product_name="Locram",
-            state=state,
-            activation_required=identity is None,
-            broker_enrollment_available=True,
-            network_features_usable=True,
-            usable_capabilities=DesktopUsableCapabilities(
-                managed_public_mcp=True,
-                local_mcp_tool_visibility=True,
-                browser_account_setup=True,
-                share_base=True,
-                multi_base=True,
-                managed_updates=False,
-                docs_ggl_updates=True,
-                agent_base_administration=True,
-            ),
-            last_attempt=self._public_activation_attempt(attempt),
-        )
-
-    def _load_activation_attempt(self) -> DesktopActivationAttemptRecord | None:
+    def _enroll_pending_transfer(
+        self,
+        last_attempt: DesktopActivationAttemptRecord,
+    ) -> DesktopActivationStatus:
         try:
-            return self._access_repository.load_activation_attempt()
-        except ValidationError:
-            return None
+            self.enroll(
+                AccessEnrollRequest(
+                    account_entitlement_token=last_attempt.broker_enrollment_token,
+                    activation_session_id=last_attempt.activation_session_id,
+                    broker_base_url=last_attempt.broker_base_url,
+                    machine_label=last_attempt.machine_label,
+                    client_public_key=last_attempt.client_public_key,
+                    client_private_key_pem=last_attempt.client_private_key_pem,
+                    transfer_session_id=last_attempt.transfer_session_id,
+                )
+            )
+        except TransferRequiredError as error:
+            self._save_pending_transfer(
+                last_attempt,
+                last_attempt.broker_enrollment_token or "",
+                last_attempt.broker_base_url or "",
+                error.transfer_session_id,
+            )
+            return self._desktop_activation_status()
+
+        return self._finish_desktop_activation()
+
+    def _save_pending_transfer(
+        self,
+        last_attempt: DesktopActivationAttemptRecord,
+        token: str,
+        broker_base_url: str,
+        transfer_session_id: str,
+    ) -> None:
+        self._access_repository.save_activation_attempt(
+            DesktopActivationAttemptRecord(
+                state="pending",
+                observed_at=self._now(),
+                message=(
+                    "Pro is already active on another device. "
+                    "Confirm the seat transfer in the browser, then return here."
+                ),
+                error_code="transfer_required",
+                retryable=True,
+                activation_session_id=last_attempt.activation_session_id,
+                activation_secret=last_attempt.activation_secret,
+                approval_url=self._approval_url_with_transfer(
+                    last_attempt.approval_url,
+                    transfer_session_id,
+                ),
+                expires_at=last_attempt.expires_at,
+                machine_label=last_attempt.machine_label,
+                client_public_key=last_attempt.client_public_key,
+                client_private_key_pem=last_attempt.client_private_key_pem,
+                key_algorithm=last_attempt.key_algorithm,
+                transfer_session_id=transfer_session_id,
+                broker_enrollment_token=token,
+                broker_base_url=broker_base_url,
+            )
+        )
 
     def _save_failed_activation(self, message: str, error_code: str) -> None:
         self._access_repository.save_activation_attempt(
@@ -1137,6 +1339,33 @@ class AccessService(IAccessService):
             return public_key, private_key_pem
 
         return AccessService.generate_device_keys()
+
+    @staticmethod
+    def _is_ready_to_enroll_transfer(attempt: DesktopActivationAttemptRecord) -> bool:
+        if attempt.state != "pending":
+            return False
+
+        return (
+            attempt.transfer_session_id is not None
+            and attempt.broker_enrollment_token is not None
+            and attempt.broker_base_url is not None
+            and attempt.client_public_key is not None
+            and attempt.client_private_key_pem is not None
+        )
+
+    @staticmethod
+    def _approval_url_with_transfer(
+        approval_url: str | None,
+        transfer_session_id: str,
+    ) -> str | None:
+        if approval_url is None:
+            return None
+
+        parsed = urlparse(approval_url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query["intent"] = "activation_transfer"
+        query["transfer_session_id"] = transfer_session_id
+        return urlunparse(parsed._replace(query=urlencode(query)))
 
     @staticmethod
     def _is_pending_activation(attempt: DesktopActivationAttemptRecord | None) -> bool:
@@ -1253,19 +1482,25 @@ class AccessService(IAccessService):
 
     @staticmethod
     def _enroll_error(response: httpx.Response) -> AccessError:
-        broker_error = ""
+        body: BrokerErrorBody | None = None
 
         try:
-            broker_error = BrokerErrorBody.model_validate_json(response.text).error or ""
+            body = BrokerErrorBody.model_validate_json(response.text)
         except ValidationError:
-            broker_error = ""
+            body = None
+
+        broker_error = "" if body is None else (body.error or "")
+        transfer_session_id = "" if body is None else (body.transfer_session_id or "").strip()
 
         if response.status_code == 409 and broker_error == "transfer_required":
-            return AccessError(
-                "Pro is already active on another device. "
-                "Transfer activation to this device from your account.",
-                409,
-            )
+            if transfer_session_id == "":
+                return AccessError(
+                    "Pro is already active on another device. "
+                    "Transfer activation to this device from your account.",
+                    409,
+                )
+
+            return TransferRequiredError(transfer_session_id)
 
         if response.status_code == 409 and broker_error == "seat_unavailable":
             return AccessError(
@@ -1588,6 +1823,293 @@ class AccessService(IAccessService):
             onboarding["authorization_server_url"] = authorization_server_url
 
         return onboarding
+
+    def _current_usable_capabilities(self) -> DesktopUsableCapabilities:
+        record = self._access_repository.load()
+        lease = self._entitlement_lease_status(record)
+        return self._usable_capabilities(self._edition_from_lease(lease))
+
+    def _refresh_entitlement_lease(self) -> None:
+        record = self._access_repository.load()
+
+        if record is None or not self._has_credentials(record):
+            return
+
+        if not self._entitlement_refresh_due(record):
+            return
+
+        device_id = (record.identity or "").strip()
+        relay_token = record.credential_data.get("relay_token", "").strip()
+
+        if device_id == "" or relay_token == "":
+            return
+
+        try:
+            response = self._http_client.post(
+                f"{self._broker_url(record)}/api/devices/lease/refresh",
+                json={"device_id": device_id, "relay_token": relay_token},
+                timeout=self._settings.broker_timeout_seconds,
+            )
+        except httpx.RequestError:
+            self._mark_entitlement_refresh(record)
+            return
+
+        if response.status_code >= 400:
+            self._mark_entitlement_refresh(record)
+            return
+
+        try:
+            refreshed = BrokerLeaseRefreshResponse.model_validate_json(response.text)
+        except ValidationError:
+            self._mark_entitlement_refresh(record)
+            return
+
+        if refreshed.entitlement_lease is None:
+            self._mark_entitlement_refresh(record)
+            return
+
+        raw_lease = self._raw_entitlement_lease(response.text)
+
+        if raw_lease is None or not self._entitlement_signature_valid(raw_lease):
+            self._mark_entitlement_refresh(record)
+            return
+
+        self._store_entitlement_lease(record.credential_data, raw_lease)
+        record.updated_at = self._now()
+        self._access_repository.save(record)
+
+    def _entitlement_refresh_due(self, record: AccessCredentialRecord) -> bool:
+        refreshed_at = record.credential_data.get("entitlement_lease_refreshed_at", "").strip()
+
+        if refreshed_at != "":
+            elapsed = datetime.now(UTC) - self._parse_entitlement_time(refreshed_at)
+
+            if elapsed.total_seconds() < self._settings.entitlement_refresh_cooldown_seconds:
+                return False
+
+        lease = self._load_entitlement_lease(record)
+
+        if lease is None:
+            return True
+
+        expires_at = lease.payload.expires_at
+
+        if expires_at is None:
+            return True
+
+        remaining = self._parse_entitlement_time(expires_at) - datetime.now(UTC)
+        return remaining.total_seconds() <= self._settings.entitlement_refresh_window_seconds
+
+    def _mark_entitlement_refresh(self, record: AccessCredentialRecord) -> None:
+        record.credential_data["entitlement_lease_refreshed_at"] = self._now()
+        record.updated_at = self._now()
+        self._access_repository.save(record)
+
+    def _store_entitlement_lease_from_response(
+        self,
+        credential_data: dict[str, str],
+        response_text: str,
+    ) -> None:
+        raw_lease = self._raw_entitlement_lease(response_text)
+
+        if raw_lease is None:
+            return
+
+        self._store_entitlement_lease(credential_data, raw_lease)
+
+    @staticmethod
+    def _store_entitlement_lease(credential_data: dict[str, str], raw_lease: str) -> None:
+        credential_data["entitlement_lease"] = raw_lease
+        credential_data["entitlement_lease_refreshed_at"] = AccessService._now()
+
+    @staticmethod
+    def _raw_entitlement_lease(response_text: str) -> str | None:
+        try:
+            lease = json.loads(response_text).get("entitlement_lease")
+        except (ValueError, AttributeError):
+            return None
+
+        if lease is None:
+            return None
+
+        return json.dumps(lease, separators=(",", ":"), sort_keys=True)
+
+    def _entitlement_lease_status(
+        self,
+        record: AccessCredentialRecord | None,
+    ) -> DesktopEntitlementLeaseStatus | None:
+        if record is None:
+            return None
+
+        raw = record.credential_data.get("entitlement_lease", "").strip()
+        refreshed_at = record.credential_data.get("entitlement_lease_refreshed_at")
+
+        if raw == "":
+            return DesktopEntitlementLeaseStatus(
+                state="missing",
+                verified=False,
+                reason="Entitlement lease has not been received yet.",
+                last_refresh_at=refreshed_at,
+            )
+
+        try:
+            lease = SignedEntitlementLease.model_validate_json(raw)
+        except ValidationError:
+            return DesktopEntitlementLeaseStatus(
+                state="invalid",
+                verified=False,
+                reason="The saved entitlement lease could not be read.",
+                last_refresh_at=refreshed_at,
+            )
+
+        payload = lease.payload
+        verified = self._entitlement_signature_valid(raw)
+
+        if not verified:
+            return DesktopEntitlementLeaseStatus(
+                state="invalid",
+                verified=False,
+                reason="The saved entitlement lease could not be verified.",
+                issued_at=payload.issued_at,
+                subscription_status=payload.status,
+                plan_code=payload.plan_code,
+                license_root_id=payload.license_root_id,
+                license_seat_id=payload.license_seat_id,
+                expires_at=payload.expires_at,
+                grace_until=payload.grace_until,
+                revoked_at=payload.revoked_at,
+                last_refresh_at=refreshed_at,
+            )
+
+        if payload.revoked_at is not None and payload.revoked_at.strip() != "":
+            return DesktopEntitlementLeaseStatus(
+                state="revoked",
+                verified=True,
+                reason="This entitlement was revoked by the broker.",
+                issued_at=payload.issued_at,
+                subscription_status=payload.status,
+                plan_code=payload.plan_code,
+                license_root_id=payload.license_root_id,
+                license_seat_id=payload.license_seat_id,
+                expires_at=payload.expires_at,
+                grace_until=payload.grace_until,
+                revoked_at=payload.revoked_at,
+                last_refresh_at=refreshed_at,
+            )
+
+        now = datetime.now(UTC)
+        expires_at = payload.expires_at
+        grace_until = payload.grace_until
+
+        if expires_at is not None and self._parse_entitlement_time(expires_at) > now:
+            state = "active"
+            reason = "Entitlement lease is active."
+        elif grace_until is not None and self._parse_entitlement_time(grace_until) > now:
+            state = "grace"
+            reason = "Entitlement lease is in grace."
+        else:
+            state = "expired"
+            reason = "Entitlement lease is expired."
+
+        return DesktopEntitlementLeaseStatus(
+            state=state,
+            verified=True,
+            reason=reason,
+            issued_at=payload.issued_at,
+            subscription_status=payload.status,
+            plan_code=payload.plan_code,
+            license_root_id=payload.license_root_id,
+            license_seat_id=payload.license_seat_id,
+            expires_at=payload.expires_at,
+            grace_until=payload.grace_until,
+            revoked_at=payload.revoked_at,
+            last_refresh_at=refreshed_at,
+        )
+
+    def _entitlement_signature_valid(self, raw_lease: str) -> bool:
+        public_key_text = self._settings.entitlement_public_key.strip()
+
+        if public_key_text == "":
+            return False
+
+        try:
+            body = json.loads(raw_lease)
+            payload = body["payload"]
+            signature = body["signature"]
+            public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_text))
+            public_key.verify(
+                base64.b64decode(signature),
+                json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"),
+            )
+        except (InvalidSignature, ValueError, KeyError, TypeError, binascii.Error):
+            return False
+
+        return True
+
+    def _load_entitlement_lease(
+        self,
+        record: AccessCredentialRecord,
+    ) -> SignedEntitlementLease | None:
+        raw = record.credential_data.get("entitlement_lease", "").strip()
+
+        if raw == "":
+            return None
+
+        try:
+            return SignedEntitlementLease.model_validate_json(raw)
+        except ValidationError:
+            return None
+
+    @staticmethod
+    def _edition_from_lease(lease: DesktopEntitlementLeaseStatus | None) -> str:
+        if lease is None or lease.state not in {"active", "grace"}:
+            return "free"
+
+        plan_code = (lease.plan_code or "").strip()
+
+        if plan_code == "" or plan_code == "locram_free":
+            return "free"
+
+        return "pro"
+
+    @staticmethod
+    def _edition_capabilities(edition: str) -> DesktopEditionCapabilities:
+        pro = edition == "pro"
+
+        return DesktopEditionCapabilities(
+            broker_enrollment=True,
+            managed_public_mcp=pro,
+            local_mcp_tool_visibility=pro,
+            managed_updates=pro,
+            docs_ggl_updates=pro,
+            multi_base=pro,
+            share_base=pro,
+            agent_base_administration=pro,
+        )
+
+    @staticmethod
+    def _usable_capabilities(edition: str) -> DesktopUsableCapabilities:
+        capabilities = AccessService._edition_capabilities(edition)
+
+        return DesktopUsableCapabilities(
+            managed_public_mcp=capabilities.managed_public_mcp,
+            local_mcp_tool_visibility=capabilities.local_mcp_tool_visibility,
+            browser_account_setup=True,
+            share_base=capabilities.share_base,
+            multi_base=capabilities.multi_base,
+            managed_updates=capabilities.managed_updates,
+            docs_ggl_updates=capabilities.docs_ggl_updates,
+            agent_base_administration=capabilities.agent_base_administration,
+        )
+
+    @staticmethod
+    def _parse_entitlement_time(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+
+        return parsed.astimezone(UTC)
 
     @staticmethod
     def _now() -> str:

@@ -13,6 +13,7 @@ from exceptions.pages import (
 )
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.services.embeddings import IEmbeddingService
 from interfaces.services.pages import IPageService
 from models.pages import Page
 from schemas.links import InlineLinkResponse, ParentSetResponse
@@ -44,9 +45,11 @@ class PageService(IPageService):
         self,
         page_repository: IPageRepository,
         link_repository: ILinkRepository,
+        embedding_service: IEmbeddingService | None = None,
     ) -> None:
         self._page_repository = page_repository
         self._link_repository = link_repository
+        self._embedding_service = embedding_service
 
     def create_page(self, payload: PageCreate) -> PageDetail:
         self._validate_hub(payload.type, payload.parent_id)
@@ -63,6 +66,7 @@ class PageService(IPageService):
             review_interval_days=payload.review_interval_days,
         )
         created = self._page_repository.create(page)
+        self._embed_page(created.id)
 
         return self._to_detail(created)
 
@@ -104,6 +108,7 @@ class PageService(IPageService):
         page.parent_id = record.parent_id
         page.review_interval_days = record.review_interval_days
         updated = self._page_repository.save(page)
+        self._embed_page(updated.id)
 
         return self._to_detail(updated)
 
@@ -260,6 +265,12 @@ class PageService(IPageService):
         page = self.get_page(page_id)
 
         return InlineLinkResponse(link=f"[[{page.id}|{page.title}]]")
+
+    def _embed_page(self, page_id: str) -> None:
+        if self._embedding_service is None:
+            return
+
+        self._embedding_service.embed_page(page_id)
 
     @staticmethod
     def _validate_hub(page_type: PageType, parent_id: str | None) -> None:

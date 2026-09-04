@@ -7,7 +7,7 @@ from schemas.attachments import (
     MermaidRendered,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_attachment_service() -> IAttachmentService:
@@ -42,6 +42,4 @@ def render_mermaid(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(get_attachment)
-    mcp.tool()(save_attachment)
-    mcp.tool()(render_mermaid)
+    register_tools(mcp, get_attachment, save_attachment, render_mermaid)

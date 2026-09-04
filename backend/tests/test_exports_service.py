@@ -80,6 +80,8 @@ def test_inspect_ordinary_knowledge_file(
 
     assert inspection.artifact_class == "ordinary_base"
     assert inspection.page_count == 3
+    assert inspection.created_at is not None
+    assert inspection.attachment_coverage_label == "sidecar_files"
     assert "restore" in inspection.valid_actions
 
 

@@ -23,6 +23,9 @@ from interfaces.repositories.bases import IBaseRegistryRepository, IManagedBaseR
 from interfaces.services.access import IAccessService
 from interfaces.services.bases import IBaseRegistryService
 from models.bases import BaseMetadata, RegistryEntry
+from repositories.backups import BackupRepository
+from schemas.access import DesktopCapability
+from schemas.backups import KnowledgeFileStats
 from schemas.bases import (
     AgentAccessMode,
     ManagedBaseKind,
@@ -73,34 +76,12 @@ class BaseRegistryService(IBaseRegistryService):
         activate: bool,
         display_name: str | None,
     ) -> RegistryEntryRecord:
-        resolved = Path(path).expanduser().resolve()
-
-        if not resolved.is_file():
-            raise BaseFileNotFoundError(str(resolved))
-
-        metadata = self._read_or_create_metadata(resolved, display_name or resolved.stem)
-        existing = self._base_registry_repository.get_by_path(str(resolved))
-
-        if existing is not None:
-            existing.base_id = metadata.base_id
-            existing.display_name = metadata.display_name
-            existing.updated_at = self._now()
-            saved = self._base_registry_repository.save(existing)
-
-            if activate:
-                return self.switch(saved.entry_id)
-
-            return self._to_record(saved)
-
-        entry = self._new_entry(str(resolved), metadata.base_id, metadata.display_name)
-        saved = self._base_registry_repository.save(entry)
-
-        if activate:
-            return self.switch(saved.entry_id)
-
-        return self._to_record(saved)
+        return self._persist_local_path(path, activate, display_name, replacing_active=False)
 
     def create(self, path: str, display_name: str, activate: bool) -> RegistryEntryRecord:
+        if self._base_registry_repository.list_entries():
+            self._deny_without_capability(DesktopCapability.MULTI_BASE)
+
         resolved = Path(path).expanduser().resolve()
 
         if resolved.exists():
@@ -111,24 +92,21 @@ class BaseRegistryService(IBaseRegistryService):
         saved = self._base_registry_repository.save(entry)
 
         if activate:
-            return self.switch(saved.entry_id)
+            return self._set_active(saved.entry_id)
 
         return self._to_record(saved)
 
     def switch(self, entry_id: str) -> RegistryEntryRecord:
         entry = self._require_entry(entry_id)
 
-        if not Path(entry.path).is_file():
-            raise BaseFileNotFoundError(entry.path)
+        if not entry.is_active:
+            self._deny_without_capability(DesktopCapability.MULTI_BASE)
 
-        self._read_or_create_metadata(Path(entry.path), entry.display_name)
-        self._base_registry_repository.set_active(entry_id)
-        database.knowledge_engines.clear()
-        return self._to_record(self._require_entry(entry_id))
+        return self._set_active(entry_id)
 
     def replace_active(self, path: str) -> RegistryEntryRecord:
         previous = self.get_active()
-        activated = self.register(path, activate=True, display_name=None)
+        activated = self._persist_local_path(path, True, None, replacing_active=True)
 
         if previous is not None and previous.entry_id != activated.entry_id:
             self.unregister(previous.entry_id)
@@ -184,6 +162,7 @@ class BaseRegistryService(IBaseRegistryService):
         entry_id: str,
         agent_access_mode: AgentAccessMode,
     ) -> RegistryEntryRecord:
+        self._deny_without_capability(DesktopCapability.AGENT_BASE_ADMINISTRATION)
         entry = self._require_entry(entry_id)
         entry.agent_access_mode = agent_access_mode
         entry.updated_at = self._now()
@@ -198,6 +177,8 @@ class BaseRegistryService(IBaseRegistryService):
         locale: str | None = None,
     ) -> ManagedBaseSummaryRecord:
         managed_kind = self._managed_kind(kind)
+
+        self._deny_without_capability(DesktopCapability.DOCS_GGL_UPDATES)
 
         if locale is not None and managed_kind is ManagedBaseKind.GGL:
             raise ManagedBaseLocaleError(kind)
@@ -272,6 +253,9 @@ class BaseRegistryService(IBaseRegistryService):
 
         if entry.agent_access_mode is AgentAccessMode.HIDDEN:
             raise WorkingBaseNotFoundError(base_ref)
+
+        if not entry.is_active:
+            self._deny_without_capability(DesktopCapability.MULTI_BASE)
 
         return self._writable_if_needed(entry, write)
 
@@ -348,6 +332,7 @@ class BaseRegistryService(IBaseRegistryService):
             remote_manifest_url=None,
             remote_artifact_url=None,
             refresh_configured=True,
+            stats=self._stats_for_path(str(snapshot.resolve())),
         )
 
     def _ensure_managed_snapshot(self, kind: ManagedBaseKind) -> Path:
@@ -381,6 +366,9 @@ class BaseRegistryService(IBaseRegistryService):
         if self._access_service is None:
             return []
 
+        if not self._access_service.has_capability(DesktopCapability.SHARE_BASE):
+            return []
+
         now = datetime.now(UTC)
         items: list[WorkingBaseRecord] = []
 
@@ -394,6 +382,7 @@ class BaseRegistryService(IBaseRegistryService):
         if self._access_service is None:
             raise WorkingBaseNotFoundError(base_ref)
 
+        self._access_service.deny_without_capability(DesktopCapability.SHARE_BASE)
         grant_id = base_ref.removeprefix("shared:")
         share = self._access_service.get_accepted_share(grant_id)
 
@@ -419,6 +408,63 @@ class BaseRegistryService(IBaseRegistryService):
             entry_id=share.grant_id,
             path="",
         )
+
+    def _persist_local_path(
+        self,
+        path: str,
+        activate: bool,
+        display_name: str | None,
+        replacing_active: bool,
+    ) -> RegistryEntryRecord:
+        resolved = Path(path).expanduser().resolve()
+
+        if not resolved.is_file():
+            raise BaseFileNotFoundError(str(resolved))
+
+        metadata = self._read_or_create_metadata(resolved, display_name or resolved.stem)
+        existing = self._base_registry_repository.get_by_path(str(resolved))
+
+        if existing is not None:
+            existing.base_id = metadata.base_id
+            existing.display_name = metadata.display_name
+            existing.updated_at = self._now()
+            saved = self._base_registry_repository.save(existing)
+
+            if activate:
+                if not replacing_active and not existing.is_active:
+                    self._deny_without_capability(DesktopCapability.MULTI_BASE)
+
+                return self._set_active(saved.entry_id)
+
+            return self._to_record(saved)
+
+        if not replacing_active and self._base_registry_repository.list_entries():
+            self._deny_without_capability(DesktopCapability.MULTI_BASE)
+
+        entry = self._new_entry(str(resolved), metadata.base_id, metadata.display_name)
+        saved = self._base_registry_repository.save(entry)
+
+        if activate:
+            return self._set_active(saved.entry_id)
+
+        return self._to_record(saved)
+
+    def _set_active(self, entry_id: str) -> RegistryEntryRecord:
+        entry = self._require_entry(entry_id)
+
+        if not Path(entry.path).is_file():
+            raise BaseFileNotFoundError(entry.path)
+
+        self._read_or_create_metadata(Path(entry.path), entry.display_name)
+        self._base_registry_repository.set_active(entry_id)
+        database.knowledge_engines.clear()
+        return self._to_record(self._require_entry(entry_id))
+
+    def _deny_without_capability(self, capability: DesktopCapability) -> None:
+        if self._access_service is None:
+            return
+
+        self._access_service.deny_without_capability(capability)
 
     def _ensure_default(self) -> None:
         if self._base_registry_repository.list_entries():
@@ -494,8 +540,7 @@ class BaseRegistryService(IBaseRegistryService):
         finally:
             session.close()
 
-    @staticmethod
-    def _to_record(entry: RegistryEntry) -> RegistryEntryRecord:
+    def _to_record(self, entry: RegistryEntry) -> RegistryEntryRecord:
         return RegistryEntryRecord(
             entry_id=entry.entry_id,
             path=entry.path,
@@ -506,7 +551,20 @@ class BaseRegistryService(IBaseRegistryService):
             created_at=entry.created_at,
             updated_at=entry.updated_at,
             visible_in_mcp=entry.agent_access_mode is not AgentAccessMode.HIDDEN,
+            registered_at=entry.created_at,
+            last_opened_at=entry.updated_at,
+            last_open_succeeded_at=entry.updated_at,
+            stats=self._stats_for_path(entry.path),
         )
+
+    @staticmethod
+    def _stats_for_path(path: str) -> KnowledgeFileStats | None:
+        resolved = Path(path)
+
+        if not resolved.is_file():
+            return None
+
+        return BackupRepository(source_path=resolved).read_stats(resolved)
 
     @staticmethod
     def _to_working_base(entry: RegistryEntryRecord) -> WorkingBaseRecord:

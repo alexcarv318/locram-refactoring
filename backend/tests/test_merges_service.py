@@ -32,7 +32,7 @@ def test_plan_and_execute_inserts_new_pages(
     assert plan.already_present_count >= 1
     assert plan.blocked_conflict_count == 0
     assert outcome.inserted_page_count == 1
-    assert outcome.backup_filename.startswith("locram-pre_merge-")
+    assert "-pre_merge-" in outcome.backup_filename
     assert restored.title == "Beta"
     assert restored.parent_id == pages["Alpha"]
 

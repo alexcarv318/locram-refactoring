@@ -21,6 +21,8 @@ import {
 } from "@/lib/graph/sharedBaseGraph";
 import {
   getManagedBrowseSourceAlias,
+  getNotesScopeKey,
+  getWorkingBaseScopeKey,
   sourceQueryKeyPart,
 } from "@/lib/sources/sourceRegistry";
 import { workingBaseReadOptions } from "@/lib/workingBaseReadOptions";
@@ -63,7 +65,9 @@ type LoadNotesScopeOptions = {
   baseUrl?: string;
   cacheNamespace?: string;
   forceRefresh?: boolean;
+  remount?: boolean;
   shouldApply?: () => boolean;
+  source?: ActiveSource | null;
 };
 
 function getScopedCacheKey(
@@ -157,23 +161,25 @@ function applyNotesGraph(
   graphData: { nodes: GraphResponseNode[]; links: GraphResponseLink[] },
   setActiveTreeSelectionKind: (value: ActiveTreeSelectionKind) => void,
   setScopeFilterOptions: (preset?: FilterPreset | null) => void,
+  source?: ActiveSource | null,
+  remount = false,
 ) {
-  useGraphStore.getState().setGraphData(graphData);
+  if (remount) {
+    useGraphStore.getState().replaceGraphData(graphData);
+    useGraphStore.getState().bumpGraphPresentationEpoch();
+  } else {
+    useGraphStore.getState().setGraphData(graphData);
+  }
   useGraphStore.getState().setFetchedGraphData(EMPTY_GRAPH_DATA);
   useGraphStore.getState().clearSelectedNodes();
   useGraphStore.getState().setGraphScope({ kind: "notes", id: "base" });
   useGraphStore.getState().clearGraphStale();
-  setScopeFilterOptions();
+  if (source?.kind === "managed-base") {
+    setOptionsFromNodes(graphData.nodes);
+  } else {
+    setScopeFilterOptions();
+  }
   setActiveTreeSelectionKind("notes");
-}
-
-function prepareLocalBaseScope(
-  setActiveSourceNodeId: (value: string | null) => void,
-  setActiveTreeSelectionKind: (value: ActiveTreeSelectionKind) => void,
-) {
-  useGraphStore.getState().resetGraphState();
-  setActiveTreeSelectionKind("notes");
-  setActiveSourceNodeId(null);
 }
 
 function buildScopeOptions(optionPages: PageSummary[]): GraphFilterOptions {
@@ -350,9 +356,15 @@ export function useDesktopScopeLoaders({
   );
 
   const getBaseNotesGraphData = useCallback(
-    async (options?: { baseUrl?: string; cacheNamespace?: string; forceRefresh?: boolean }) => {
+    async (options?: {
+      baseUrl?: string;
+      cacheNamespace?: string;
+      forceRefresh?: boolean;
+      source?: ActiveSource | null;
+    }) => {
       const baseUrl = options?.baseUrl ?? bridgeBaseUrl;
       const cacheNamespace = options?.cacheNamespace ?? graphCacheNamespace;
+      const source = options?.source !== undefined ? options.source : activeSource;
       if (!baseUrl) {
         return EMPTY_GRAPH_DATA;
       }
@@ -371,7 +383,7 @@ export function useDesktopScopeLoaders({
       }
 
       const scopeGraph = await runWithSelectionLoading(
-        () => fetchNotesGraph(baseUrl, graphDepth, workingBaseReadOptions(activeSource)),
+        () => fetchNotesGraph(baseUrl, graphDepth, workingBaseReadOptions(source)),
         "refresh",
       );
       const graphData = adaptScopeGraphToReusedGraph(scopeGraph);
@@ -394,11 +406,12 @@ export function useDesktopScopeLoaders({
       }
 
       const scope = { kind: "notes", id: "base" } as const;
-      const scopeKey = getScopedCacheKey(cacheNamespace, scope, { graphDepth });
+      const source = options?.source !== undefined ? options.source : activeSource;
       const graphData = await getBaseNotesGraphData({
         baseUrl,
         cacheNamespace,
         forceRefresh: options?.forceRefresh,
+        source,
       });
 
       if (options?.shouldApply && !options.shouldApply()) {
@@ -409,17 +422,30 @@ export function useDesktopScopeLoaders({
         useGraphStore.getState().resetGraphState();
         useGraphStore.getState().setGraphScope(scope);
         useGraphStore.getState().clearGraphStale();
-        setScopeFilterOptions();
+        if (options?.remount) {
+          useGraphStore.getState().bumpGraphPresentationEpoch();
+        }
+        if (source?.kind === "managed-base") {
+          setOptionsFromNodes([]);
+        } else {
+          setScopeFilterOptions();
+        }
         setActiveTreeSelectionKind("notes");
         return;
       }
-      applyNotesGraph(graphData, setActiveTreeSelectionKind, setScopeFilterOptions);
+      applyNotesGraph(
+        graphData,
+        setActiveTreeSelectionKind,
+        setScopeFilterOptions,
+        source,
+        options?.remount === true,
+      );
     },
     [
+      activeSource,
       bridgeBaseUrl,
       getBaseNotesGraphData,
       graphCacheNamespace,
-      graphDepth,
       setActiveTreeSelectionKind,
       setScopeFilterOptions,
     ],
@@ -541,11 +567,17 @@ export function useDesktopScopeLoaders({
         return;
       }
 
-      if (source.kind === "local-base") {
+      if (source.kind === "local-base" || source.kind === "managed-base") {
         if (options?.shouldApply && !options.shouldApply()) {
           return;
         }
-        prepareLocalBaseScope(setActiveSourceNodeId, setActiveTreeSelectionKind);
+        await loadNotesScope({
+          cacheNamespace: getNotesScopeKey(source, getWorkingBaseScopeKey(source)),
+          forceRefresh: options?.forceRefresh,
+          remount: true,
+          shouldApply: options?.shouldApply,
+          source,
+        });
         return;
       }
 
@@ -631,42 +663,6 @@ export function useDesktopScopeLoaders({
         return;
       }
 
-      const managedBrowseAlias = getManagedBrowseSourceAlias(source);
-      if (managedBrowseAlias !== null) {
-        const pages = await runWithSelectionLoading(
-          () =>
-            getSourceRootPages(source, {
-              forceRefresh: options?.forceRefresh,
-            }),
-          "refresh",
-        );
-        if (options?.shouldApply && !options.shouldApply()) {
-          return;
-        }
-        const nodes = pages.map((page) =>
-          scopeNode(page.id, page.title, {
-            type: page.type,
-            status: page.status,
-            subject: page.subject,
-            tags: page.tags,
-            updated_at: page.updated_at,
-          }),
-        );
-        const resolvedActiveNodeId =
-          source.kind === "managed-base"
-            ? activeNodeId ?? null
-            : activeNodeId ?? pages[0]?.id ?? null;
-        cacheSourceGraph(source, { nodes, links: [] }, resolvedActiveNodeId);
-        applySourceGraph(
-          source,
-          { nodes, links: [] },
-          setActiveTreeSelectionKind,
-          setActiveSourceNodeId,
-          resolvedActiveNodeId,
-        );
-        return;
-      }
-
       const rootPages = await runWithSelectionLoading(
         () => getSourceRootPages(source, { forceRefresh: options?.forceRefresh }),
         "refresh",
@@ -685,6 +681,7 @@ export function useDesktopScopeLoaders({
       cacheSourceGraph,
       getSourceRootPages,
       graphDepth,
+      loadNotesScope,
       loadSharedBasePagesRecursively,
       mapRootPageToSourceNode,
       getSourceScopeKey,

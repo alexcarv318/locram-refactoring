@@ -299,7 +299,7 @@ def test_managed_seed_search_uses_pages_search_index(
         documentation_hits = PageService(
             PageRepository(documentation_session),
             LinkRepository(documentation_session),
-        ).search_pages("Responsibility", limit=10)
+        ).search_pages("About locram", limit=10)
         leftover_ggl = ggl_session.execute(
             text("SELECT name FROM sqlite_master WHERE name = 'pages_fts'")
         ).scalar()
@@ -311,9 +311,39 @@ def test_managed_seed_search_uses_pages_search_index(
         documentation_session.close()
 
     assert any(hit.title == "Scenario Routing Map" for hit in ggl_hits)
-    assert any(
-        hit.title == "How Humans and AI Share Responsibility in Locram"
-        for hit in documentation_hits
-    )
+    assert any(hit.title == "About locram" for hit in documentation_hits)
     assert leftover_ggl is None
     assert leftover_documentation is None
+
+
+def test_managed_seeds_match_published_product(
+    base_registry_service: BaseRegistryService,
+) -> None:
+    ggl = base_registry_service.refresh_managed_base("ggl")
+    documentation = base_registry_service.refresh_managed_base("documentation")
+    ggl_session = open_knowledge_session(Path(ggl.path))
+    documentation_session = open_knowledge_session(Path(documentation.path))
+
+    try:
+        ggl_page_count = ggl_session.scalar(text("SELECT COUNT(*) FROM pages"))
+        ggl_deleted_count = ggl_session.scalar(
+            text("SELECT COUNT(*) FROM pages WHERE status = 'to_delete'")
+        )
+        ggl_link_count = ggl_session.scalar(text("SELECT COUNT(*) FROM links"))
+        ggl_display_name = ggl_session.scalar(text("SELECT display_name FROM base_metadata"))
+        documentation_titles = list(
+            documentation_session.scalars(select(Page.title).order_by(Page.title))
+        )
+    finally:
+        ggl_session.close()
+        documentation_session.close()
+
+    assert ggl_page_count == 84
+    assert ggl_deleted_count == 0
+    assert ggl_link_count == 334
+    assert ggl_display_name == "Graph Governance"
+    assert documentation_titles == [
+        "About locram",
+        "Locram Network overview",
+        "Release and download guidance",
+    ]

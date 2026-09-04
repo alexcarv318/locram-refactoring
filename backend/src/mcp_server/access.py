@@ -8,7 +8,7 @@ from dependencies import get_access_service as load_access_service
 from interfaces.services.access import IAccessService
 from schemas.access import AccessIdentitySummary, AccessSummary
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_access_service() -> IAccessService:
@@ -29,5 +29,4 @@ def access_identity() -> AccessIdentitySummary:
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(access_summary)
-    mcp.tool()(access_identity)
+    register_tools(mcp, access_summary, access_identity)

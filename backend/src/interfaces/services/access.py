@@ -15,11 +15,12 @@ from schemas.access import (
     AccessSummary,
     BrokerActionResult,
     ConnectedOAuthSession,
+    DesktopCapability,
     InviteMintRequest,
     PendingAuthorizationRequest,
     ResolvedBaseShareSession,
 )
-from schemas.bridge import DesktopActivationStatus
+from schemas.bridge import DesktopActivationStatus, DesktopEditionStatus
 from schemas.sharing import ShareInvite
 
 
@@ -83,10 +84,25 @@ class IAccessService(ABC):
     def desktop_activation_status(self) -> DesktopActivationStatus: ...
 
     @abstractmethod
+    def desktop_edition(self) -> DesktopEditionStatus: ...
+
+    @abstractmethod
+    def has_capability(self, capability: DesktopCapability) -> bool: ...
+
+    @abstractmethod
+    def deny_without_capability(self, capability: DesktopCapability) -> None: ...
+
+    @abstractmethod
     def start_or_continue_desktop_activation(
         self,
         machine_label: str | None,
     ) -> DesktopActivationStatus: ...
+
+    @abstractmethod
+    def sign_out(self) -> DesktopActivationStatus: ...
+
+    @abstractmethod
+    def forget_device(self) -> DesktopActivationStatus: ...
 
     @abstractmethod
     def connect(self) -> AccessRuntimeResponse: ...

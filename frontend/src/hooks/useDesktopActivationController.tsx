@@ -5,7 +5,6 @@ import {
   useContext,
   useEffect,
   useRef,
-  useState,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -44,19 +43,11 @@ type DesktopActivationControllerProviderProps = {
   bridgeBaseUrlOverride?: string;
 };
 
-export type ActivationAutoPollWindow = {
-  sessionKey: string;
-  deadlineMs: number;
-  expired: boolean;
-};
-
 export function accessQueryKey(baseUrl: string) {
   return ["access-summary", baseUrl] as const;
 }
 
 const BRIDGE_STARTUP_RETRY_COUNT = 30;
-const ACTIVATION_AUTO_POLL_INTERVAL_MS = 2_000;
-const ACTIVATION_AUTO_POLL_MAX_MS = 5 * 60_000;
 
 function bridgeStartupRetryDelay(attempt: number) {
   return Math.min(1_000 * 2 ** attempt, 5_000);
@@ -90,53 +81,11 @@ export function shouldOpenApprovalUrl(
   return false;
 }
 
-function parseTimestampMs(value: string | null | undefined): number | null {
-  if (!value) {
-    return null;
-  }
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
-
-export function pendingActivationSessionKey(
-  activation: DesktopActivationStatus | undefined,
-): string | null {
-  const attempt = activation?.lastAttempt;
-  if (!attempt || attempt.state !== "pending" || !attempt.approvalUrl) {
-    return null;
-  }
-  return [attempt.activationSessionId ?? "activation:none", attempt.transferSessionId ?? "transfer:none"].join("|");
-}
-
-export function nextActivationAutoPollWindow(
-  currentWindow: ActivationAutoPollWindow | null,
-  activation: DesktopActivationStatus | undefined,
-  nowMs: number,
-): ActivationAutoPollWindow | null {
-  const sessionKey = pendingActivationSessionKey(activation);
-  if (!sessionKey) {
-    return null;
-  }
-  const expiresAtMs = parseTimestampMs(activation?.lastAttempt?.expiresAt);
-  const nextDeadlineMs =
-    currentWindow?.sessionKey === sessionKey
-      ? Math.min(currentWindow.deadlineMs, expiresAtMs ?? Number.POSITIVE_INFINITY)
-      : Math.min(expiresAtMs ?? Number.POSITIVE_INFINITY, nowMs + ACTIVATION_AUTO_POLL_MAX_MS);
-  return {
-    sessionKey,
-    deadlineMs: nextDeadlineMs,
-    expired:
-      (currentWindow?.sessionKey === sessionKey && currentWindow.expired) ||
-      nextDeadlineMs <= nowMs,
-  };
-}
-
 function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
   const queryClient = useQueryClient();
   const activationRequestPromiseRef = useRef<Promise<ActivationRequestResult> | null>(null);
-  const [isAwaitingBrowserSignIn, setIsAwaitingBrowserSignIn] = useState(false);
-  const [activationAutoPollWindow, setActivationAutoPollWindow] =
-    useState<ActivationAutoPollWindow | null>(null);
+  const didMountContinueRef = useRef(false);
+  const wasHiddenRef = useRef(false);
   const bridgeBaseUrlQuery = useQuery({
     queryKey: DESKTOP_BRIDGE_QUERY_KEYS.bridgeBaseUrl,
     queryFn: resolveBridgeBaseUrl,
@@ -189,60 +138,12 @@ function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
   const isTransferActivationPending =
     isBrowserActivationPending &&
     desktopActivationQuery.data?.lastAttempt?.errorCode === "transfer_required";
-  const currentPendingActivationSessionKey = pendingActivationSessionKey(
-    desktopActivationQuery.data,
-  );
-
-  useEffect(() => {
-    const attemptState = desktopActivationQuery.data?.lastAttempt?.state;
-    if (attemptState === "failed_retryable" || attemptState === "failed_terminal") {
-      setIsAwaitingBrowserSignIn(false);
-    }
-  }, [desktopActivationQuery.data?.lastAttempt?.state]);
-
-  useEffect(() => {
-    if (!requiresSignIn) {
-      setIsAwaitingBrowserSignIn(false);
-    }
-  }, [requiresSignIn]);
 
   useEffect(() => {
     const granted =
       accessSummaryQuery.data?.accountIdentity?.analyticsConsent?.granted ?? true;
     setTelemetryConsentGranted(granted);
   }, [accessSummaryQuery.data?.accountIdentity?.analyticsConsent?.granted]);
-
-  useEffect(() => {
-    setActivationAutoPollWindow((current) =>
-      nextActivationAutoPollWindow(current, desktopActivationQuery.data, Date.now()),
-    );
-  }, [currentPendingActivationSessionKey, desktopActivationQuery.data?.lastAttempt?.expiresAt]);
-
-  useEffect(() => {
-    if (!activationAutoPollWindow || activationAutoPollWindow.expired) {
-      return;
-    }
-
-    const remainingMs = activationAutoPollWindow.deadlineMs - Date.now();
-    if (remainingMs <= 0) {
-      setActivationAutoPollWindow((current) =>
-        current && current.sessionKey === activationAutoPollWindow.sessionKey
-          ? { ...current, expired: true }
-          : current,
-      );
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setActivationAutoPollWindow((current) =>
-        current && current.sessionKey === activationAutoPollWindow.sessionKey
-          ? { ...current, expired: true }
-          : current,
-      );
-    }, remainingMs);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [activationAutoPollWindow]);
 
   const activationMutation = useMutation({
     mutationFn: async ({
@@ -273,9 +174,6 @@ function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
         activationStatus,
       );
       queryClient.setQueryData(["desktop-activation", bridgeBaseUrl], activationStatus);
-      if (approvalUrlToOpen.length === 0) {
-        setIsAwaitingBrowserSignIn(false);
-      }
       let autoRepairFailed = false;
       if (
         runtimeDiagnosticsAvailable() &&
@@ -305,18 +203,12 @@ function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
       if (shouldOpenForUser || shouldReopenApprovalUrl) {
         const opened = await openExternalUrl(approvalUrlToOpen);
         if (!opened) {
-          setIsAwaitingBrowserSignIn(false);
           throw new Error(
             "Could not open the sign-in page. Allow popups for this site and try again.",
           );
         }
       }
       return { activationStatus, autoRepairFailed };
-    },
-    onError: (_error, request) => {
-      if (request.source === "account_gate") {
-        setIsAwaitingBrowserSignIn(false);
-      }
     },
   });
 
@@ -338,48 +230,53 @@ function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
     [activationMutation],
   );
 
-  const activationAutoPollAllowed =
-    isBrowserActivationPending && activationAutoPollWindow?.expired !== true;
-
   useEffect(() => {
-    if (!activationAutoPollAllowed || !bridgeBaseUrl) {
+    if (!queriesReady || !bridgeBaseUrl) {
       return;
     }
-    const pollId = window.setInterval(() => {
-      if (activationRequestPromiseRef.current) {
-        return;
-      }
-      void requestActivation({ source: "controller_poll" }).catch(() => undefined);
-    }, ACTIVATION_AUTO_POLL_INTERVAL_MS);
-    return () => window.clearInterval(pollId);
-  }, [activationAutoPollAllowed, bridgeBaseUrl, requestActivation]);
 
-  useEffect(() => {
-    if (!activationAutoPollAllowed) {
+    if (didMountContinueRef.current) {
       return;
     }
-    const resumeActivation = () => {
-      if (document.visibilityState === "hidden" || activationRequestPromiseRef.current) {
+
+    didMountContinueRef.current = true;
+
+    if (!isBrowserActivationPending) {
+      return;
+    }
+
+    void requestActivation({ source: "controller_poll" }).catch(() => undefined);
+  }, [bridgeBaseUrl, isBrowserActivationPending, queriesReady, requestActivation]);
+
+  useEffect(() => {
+    const resumeAfterHidden = () => {
+      if (document.visibilityState === "hidden") {
+        wasHiddenRef.current = true;
         return;
       }
+
+      if (!wasHiddenRef.current) {
+        return;
+      }
+
+      wasHiddenRef.current = false;
+
+      if (!isBrowserActivationPending || !bridgeBaseUrl || activationRequestPromiseRef.current) {
+        return;
+      }
+
       void requestActivation({ source: "controller_poll" }).catch(() => undefined);
     };
 
-    window.addEventListener("focus", resumeActivation);
-    document.addEventListener("visibilitychange", resumeActivation);
+    document.addEventListener("visibilitychange", resumeAfterHidden);
+
     return () => {
-      window.removeEventListener("focus", resumeActivation);
-      document.removeEventListener("visibilitychange", resumeActivation);
+      document.removeEventListener("visibilitychange", resumeAfterHidden);
     };
-  }, [activationAutoPollAllowed, requestActivation]);
+  }, [bridgeBaseUrl, isBrowserActivationPending, requestActivation]);
 
   const beginSignIn = () => {
-    setIsAwaitingBrowserSignIn(true);
     void requestActivation({ source: "account_gate" }).catch(() => undefined);
-  };
-
-  const cancelBrowserSignInWait = () => {
-    setIsAwaitingBrowserSignIn(false);
   };
 
   return {
@@ -387,15 +284,13 @@ function useProvideDesktopActivationController(bridgeBaseUrlOverride?: string) {
     activationMutation,
     approvalUrl,
     beginSignIn,
-    cancelBrowserSignInWait,
     bridgeBaseUrl,
     bridgeBaseUrlQuery,
     desktopActivationQuery,
     hasResolutionFailed,
-    isAwaitingBrowserSignIn,
     isBrowserActivationPending,
-    isResolving: bridgeBaseUrl.length === 0 || bridgeBaseUrlQuery.isPending || !queriesReady,
     isTransferActivationPending,
+    queriesReady,
     requestActivation,
     requiresSignIn,
     retryResolution,

@@ -10,9 +10,16 @@ from dependencies import (
 )
 from dependencies import get_base_registry_service as load_base_registry_service
 from interfaces.services.bases import IBaseRegistryService
-from schemas.bases import AgentAccessMode, RegistryEntryRecord, WorkingBaseRecord
+from schemas.bases import (
+    AgentAccessMode,
+    BaseDeletedResponse,
+    BaseUnregisteredResponse,
+    RegistryEntryRecord,
+    WorkingBaseListResponse,
+    WorkingBaseRecord,
+)
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_base_registry_service() -> IBaseRegistryService:
@@ -48,16 +55,23 @@ def base_rename_base(entry_id: str, display_name: str) -> RegistryEntryRecord:
     return get_base_registry_service().rename(entry_id, display_name)
 
 
-def base_unregister_base(entry_id: str) -> None:
+def base_unregister_base(entry_id: str) -> BaseUnregisteredResponse:
     get_base_registry_service().unregister(entry_id)
 
-
-def base_delete_base(entry_id: str, force: bool = False) -> None:
-    get_base_registry_service().delete(entry_id, force)
+    return BaseUnregisteredResponse(removed=True, entry_id=entry_id)
 
 
-def working_base_list_bases() -> list[WorkingBaseRecord]:
-    return get_base_registry_service().list_working_bases()
+def base_delete_base(entry_id: str, force: bool = False) -> BaseDeletedResponse:
+    service = get_base_registry_service()
+    path = service.get_entry(entry_id).path
+
+    service.delete(entry_id, force)
+
+    return BaseDeletedResponse(deleted=True, path=path)
+
+
+def working_base_list_bases() -> WorkingBaseListResponse:
+    return WorkingBaseListResponse(items=get_base_registry_service().list_working_bases())
 
 
 def working_base_get_current_base() -> WorkingBaseRecord | None:
@@ -76,13 +90,16 @@ def base_set_agent_access_mode(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(base_register_base)
-    mcp.tool()(base_create_base)
-    mcp.tool()(base_switch_base)
-    mcp.tool()(base_rename_base)
-    mcp.tool()(base_unregister_base)
-    mcp.tool()(base_delete_base)
-    mcp.tool()(base_set_agent_access_mode)
-    mcp.tool()(working_base_list_bases)
-    mcp.tool()(working_base_get_current_base)
-    mcp.tool()(working_base_select_base)
+    register_tools(
+        mcp,
+        base_register_base,
+        base_create_base,
+        base_switch_base,
+        base_rename_base,
+        base_unregister_base,
+        base_delete_base,
+        base_set_agent_access_mode,
+        working_base_list_bases,
+        working_base_get_current_base,
+        working_base_select_base,
+    )

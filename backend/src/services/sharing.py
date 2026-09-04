@@ -27,7 +27,7 @@ from repositories.backups import BackupRepository
 from repositories.links import LinkRepository
 from repositories.pages import PageRepository
 from repositories.sharing import ShareSession
-from schemas.access import AcceptedShareRecord, InviteMintRequest
+from schemas.access import AcceptedShareRecord, DesktopCapability, InviteMintRequest
 from schemas.links import LinkType
 from schemas.pages import PageSearchHit, PageStatus, PageType, PageUpdate
 from schemas.sharing import (
@@ -118,6 +118,7 @@ class SharingService(ISharingService):
         return items
 
     def create_grant(self, payload: ShareGrantCreateRequest) -> ShareGrantRecord:
+        self._access_service.deny_without_capability(DesktopCapability.SHARE_BASE)
         owner_actor_ref = payload.owner_actor_ref.strip()
         recipient_actor_ref = (payload.recipient_actor_ref or "").strip()
         recipient_account_id = (payload.recipient_account_id or "").strip()
@@ -246,6 +247,7 @@ class SharingService(ISharingService):
         return ShareGrantDeletedResponse(removed=True, grant_id=grant_id)
 
     def backup_recipient(self, grant_id: str, trigger: str) -> RecipientBackupResult:
+        self._access_service.deny_without_capability(DesktopCapability.SHARE_BASE)
         share = self._accepted_share(grant_id)
 
         if share.permission is not ShareGrantPermission.ADMIN:

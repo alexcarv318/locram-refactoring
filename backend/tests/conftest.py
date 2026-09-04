@@ -29,6 +29,8 @@ from database import (
 )
 from dependencies import (
     get_access_relay,
+    get_access_service,
+    get_access_settings,
     get_attachment_service,
     get_base_registry_service,
     get_embedding_service,
@@ -58,10 +60,12 @@ from repositories.smart_folders import SmartFolderRepository
 from schemas.access import (
     AccessCredentialRecord,
     AccessEnrollRequest,
-    AccessSettings,
     AccessState,
+    BrokerEnrollResponse,
+    BrokerLeaseRefreshResponse,
     ConnectedOAuthSession,
     PendingAuthorizationRequest,
+    SignedEntitlementLease,
 )
 from schemas.links import LinkType
 from schemas.pages import PageCreate
@@ -76,6 +80,11 @@ from services.merges import MergeService
 from services.pages import PageService
 from services.sharing import SharingService
 from services.smart_folders import SmartFolderService
+from tests.entitlement import (
+    TEST_ACCESS_SETTINGS,
+    TEST_ENTITLEMENT_PUBLIC_KEY,
+    signed_entitlement_lease,
+)
 
 
 class ImmediateRelay(IAccessRelay):
@@ -104,7 +113,7 @@ class ImmediateRelay(IAccessRelay):
 
 
 class ScriptedAccessHttp:
-    def __init__(self) -> None:
+    def __init__(self, entitlement_lease: SignedEntitlementLease | None = None) -> None:
         self.enroll_status = 200
         self.enroll_body: dict[str, str | dict[str, str]] = {
             "device_id": "device-one",
@@ -120,6 +129,9 @@ class ScriptedAccessHttp:
                 "account_id": "acct-one",
             },
         }
+        self.entitlement_lease = (
+            signed_entitlement_lease() if entitlement_lease is None else entitlement_lease
+        )
         self.pending_items: list[PendingAuthorizationRequest] = []
         self.session_items: list[ConnectedOAuthSession] = []
         self.posts: list[str] = []
@@ -178,7 +190,26 @@ class ScriptedAccessHttp:
         self.posts.append(url)
 
         if url.endswith("/api/devices/enroll"):
-            return httpx.Response(self.enroll_status, json=self.enroll_body)
+            if self.enroll_status >= 400:
+                return httpx.Response(self.enroll_status, json=self.enroll_body)
+
+            enrolled = BrokerEnrollResponse.model_validate(self.enroll_body).model_copy(
+                update={"entitlement_lease": self.entitlement_lease}
+            )
+
+            return httpx.Response(
+                self.enroll_status,
+                text=enrolled.model_dump_json(exclude_none=True),
+            )
+
+        if url.endswith("/api/devices/lease/refresh"):
+            return httpx.Response(
+                200,
+                text=BrokerLeaseRefreshResponse(
+                    status="refreshed",
+                    entitlement_lease=self.entitlement_lease,
+                ).model_dump_json(exclude_none=True),
+            )
 
         if url.endswith("/v1/activation/sessions"):
             return httpx.Response(self.activation_session_status, json=self.activation_session_body)
@@ -191,6 +222,7 @@ class ScriptedAccessHttp:
 
 @pytest.fixture(autouse=True)
 def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr(database, "locram_home", tmp_path)
     monkeypatch.setattr(database, "host_state_path", tmp_path / "host-state.db")
     monkeypatch.setattr(database, "knowledge_path", tmp_path / "locram.db")
     monkeypatch.setattr(database, "attachments_path", tmp_path / "attachments")
@@ -225,6 +257,16 @@ def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
         "desktop_activation_path",
         tmp_path / "preferences" / "desktop-activation.json",
     )
+    monkeypatch.setattr(
+        database,
+        "mcp_tool_visibility_path",
+        tmp_path / "preferences" / "mcp-tool-visibility.json",
+    )
+    monkeypatch.setattr(
+        database,
+        "desktop_user_settings_path",
+        tmp_path / "preferences" / "desktop-user-settings.json",
+    )
     monkeypatch.setattr(database, "managed_bases_path", tmp_path / "managed-bases")
     monkeypatch.setattr(database, "shared_mirrors_path", tmp_path / "shared-mirrors")
     monkeypatch.setattr(
@@ -242,6 +284,16 @@ def isolated_locram_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
     get_registry_engine.cache_clear()
     bases_state.selected_working_base_ref = None
     get_access_relay().stop()
+
+
+@pytest.fixture(autouse=True)
+def test_entitlement_public_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("LOCRAM_DESKTOP_ENTITLEMENT_PUBLIC_KEY", TEST_ENTITLEMENT_PUBLIC_KEY)
+    get_access_settings.cache_clear()
+
+    yield
+
+    get_access_settings.cache_clear()
 
 
 def create_test_engine() -> Engine:
@@ -410,8 +462,7 @@ def base_registry_service() -> BaseRegistryService:
     )
 
 
-@pytest.fixture
-def access_service() -> AccessService:
+def make_access_service(http_client: ScriptedAccessHttp | None = None) -> AccessService:
     return AccessService(
         access_repository=AccessRepository(
             database.access_path,
@@ -419,24 +470,30 @@ def access_service() -> AccessService:
             database.accepted_shares_path,
         ),
         access_relay=ImmediateRelay(),
-        http_client=ScriptedAccessHttp(),
-        settings=AccessSettings(),
+        http_client=ScriptedAccessHttp() if http_client is None else http_client,
+        settings=TEST_ACCESS_SETTINGS,
     )
 
 
 @pytest.fixture
-def enrolled_access() -> AccessService:
-    http_client = ScriptedAccessHttp()
-    service = AccessService(
-        access_repository=AccessRepository(
-            database.access_path,
-            database.access_credentials_path,
-            database.accepted_shares_path,
-        ),
-        access_relay=ImmediateRelay(),
-        http_client=http_client,
-        settings=AccessSettings(),
+def access_service() -> AccessService:
+    return make_access_service()
+
+
+@pytest.fixture
+def free_enrolled_access() -> AccessService:
+    service = make_access_service(
+        ScriptedAccessHttp(signed_entitlement_lease(plan_code="locram_free"))
     )
+    service.enroll(
+        AccessEnrollRequest(redemption_code="code-one", broker_base_url="https://broker.example.test")
+    )
+    return service
+
+
+@pytest.fixture
+def enrolled_access() -> AccessService:
+    service = make_access_service()
     service.enroll(
         AccessEnrollRequest(redemption_code="code-one", broker_base_url="https://broker.example.test")
     )
@@ -461,16 +518,7 @@ def enrolled_access_with_pending() -> AccessService:
             state=None,
         )
     ]
-    service = AccessService(
-        access_repository=AccessRepository(
-            database.access_path,
-            database.access_credentials_path,
-            database.accepted_shares_path,
-        ),
-        access_relay=ImmediateRelay(),
-        http_client=http_client,
-        settings=AccessSettings(),
-    )
+    service = make_access_service(http_client)
     service.enroll(
         AccessEnrollRequest(redemption_code="code-one", broker_base_url="https://broker.example.test")
     )
@@ -481,22 +529,27 @@ def enrolled_access_with_pending() -> AccessService:
 def sharing_service(base_registry_service: BaseRegistryService) -> SharingService:
     base_registry_service.list_bases()
     session = create_session_factory(get_registry_engine())()
+    access_service = make_access_service()
+    access_service.enroll(
+        AccessEnrollRequest(redemption_code="code-one", broker_base_url="https://broker.example.test")
+    )
 
     return SharingService(
         sharing_repository=SharingRepository(session),
         base_registry_repository=BaseRegistryRepository(session),
-        access_service=AccessService(
-            access_repository=AccessRepository(
-                database.access_path,
-                database.access_credentials_path,
-                database.accepted_shares_path,
-            ),
-            access_relay=ImmediateRelay(),
-            http_client=ScriptedAccessHttp(),
-            settings=AccessSettings(),
-        ),
+        access_service=access_service,
         http_client=ScriptedAccessHttp(),
     )
+
+
+@pytest.fixture
+def pro_client(enrolled_access: AccessService) -> Iterator[TestClient]:
+    app.dependency_overrides[get_access_service] = lambda: enrolled_access
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

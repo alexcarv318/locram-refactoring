@@ -1,24 +1,29 @@
-from dependencies import get_link_repository, get_page_repository, get_working_base
+from dependencies import (
+    get_link_repository,
+    get_local_embedding_service,
+    get_page_repository,
+    get_working_base,
+)
 from dependencies import get_page_service as load_page_service
 from interfaces.services.pages import IPageService
 from schemas.links import InlineLinkResponse
 from schemas.pages import (
-    PageAncestor,
+    PageAncestryResponse,
     PageCreate,
     PageDeletedResponse,
     PageDetail,
+    PageListResponse,
     PagePromotedResponse,
     PagePurgedResponse,
     PageRestoredResponse,
     PageReviewedResponse,
-    PageSearchHit,
+    PageSearchResponse,
     PageStatus,
-    PageSummary,
     PageType,
     PageUpdate,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_page_service(
@@ -32,6 +37,10 @@ def get_page_service(
     return load_page_service(
         get_page_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
         get_link_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+        get_local_embedding_service(
+            base_ref=base_ref,
+            recipient_actor_ref=recipient_actor_ref,
+        ),
     )
 
 
@@ -184,15 +193,17 @@ def list_pages(
     parent_id: str | None = None,
     base_ref: str | None = None,
     recipient_actor_ref: str | None = None,
-) -> list[PageSummary]:
+) -> PageListResponse:
     roots_only = parent_id == "root"
 
-    return get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).list_pages(
-        status=status,
-        parent_id=None if roots_only else parent_id,
-        roots_only=roots_only,
-        limit=10_000,
-        offset=0,
+    return PageListResponse(
+        items=get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).list_pages(
+            status=status,
+            parent_id=None if roots_only else parent_id,
+            roots_only=roots_only,
+            limit=10_000,
+            offset=0,
+        )
     )
 
 
@@ -201,10 +212,12 @@ def search(
     limit: int = 20,
     base_ref: str | None = None,
     recipient_actor_ref: str | None = None,
-) -> list[PageSearchHit]:
-    return get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).search_pages(
-        query,
-        limit,
+) -> PageSearchResponse:
+    return PageSearchResponse(
+        items=get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).search_pages(
+            query,
+            limit,
+        )
     )
 
 
@@ -212,9 +225,11 @@ def get_page_ancestry(
     page_id: str,
     base_ref: str | None = None,
     recipient_actor_ref: str | None = None,
-) -> list[PageAncestor]:
-    return get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).get_page_ancestry(
-        page_id
+) -> PageAncestryResponse:
+    return PageAncestryResponse(
+        items=get_page_service(base_ref, recipient_actor_ref=recipient_actor_ref).get_page_ancestry(
+            page_id
+        )
     )
 
 
@@ -243,16 +258,19 @@ def replace_in_page(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(create_page)
-    mcp.tool()(get_page)
-    mcp.tool()(update_page)
-    mcp.tool()(delete_page)
-    mcp.tool()(restore_page)
-    mcp.tool()(purge_page)
-    mcp.tool()(mark_reviewed)
-    mcp.tool()(promote_page)
-    mcp.tool()(list_pages)
-    mcp.tool()(search)
-    mcp.tool()(get_page_ancestry)
-    mcp.tool()(get_inline_link)
-    mcp.tool()(replace_in_page)
+    register_tools(
+        mcp,
+        create_page,
+        get_page,
+        update_page,
+        delete_page,
+        restore_page,
+        purge_page,
+        mark_reviewed,
+        promote_page,
+        list_pages,
+        search,
+        get_page_ancestry,
+        get_inline_link,
+        replace_in_page,
+    )

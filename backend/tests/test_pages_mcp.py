@@ -18,7 +18,7 @@ def test_mcp_page_tools(mcp_page_service: PageService) -> None:
 
     assert fetched.title == "MCP note"
     assert fetched.content.startswith("# MCP note")
-    assert any(item.id == created.id for item in items)
+    assert any(item.id == created.id for item in items.items)
 
 
 def test_mcp_update_search_ancestry_and_lifecycle(mcp_page_service: PageService) -> None:
@@ -32,16 +32,16 @@ def test_mcp_update_search_ancestry_and_lifecycle(mcp_page_service: PageService)
 
     hits = mcp_pages.search("page")
 
-    assert any(hit.id == child.id for hit in hits)
-    assert mcp_pages.search("   ") == []
+    assert any(hit.id == child.id for hit in hits.items)
+    assert mcp_pages.search("   ").items == []
 
     ancestry = mcp_pages.get_page_ancestry(child.id)
 
-    assert [item.id for item in ancestry] == [parent.id]
+    assert [item.id for item in ancestry.items] == [parent.id]
 
     roots = mcp_pages.list_pages(parent_id="root")
 
-    assert [item.id for item in roots] == [parent.id]
+    assert [item.id for item in roots.items] == [parent.id]
 
     promoted = mcp_pages.promote_page(child.id)
 

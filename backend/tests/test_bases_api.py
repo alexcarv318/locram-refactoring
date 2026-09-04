@@ -19,6 +19,10 @@ def test_http_base_lifecycle(client: TestClient, tmp_path: Path) -> None:
     assert listed.status_code == 200
     assert listed.json()["active_base"]["entry_id"] == entry_id
     assert listed.json()["items"][0]["display_name"] == "Alpha"
+    assert listed.json()["items"][0]["stats"]["page_count"] == 0
+    assert listed.json()["items"][0]["stats"]["link_count"] == 0
+    assert listed.json()["items"][0]["registered_at"] == listed.json()["items"][0]["created_at"]
+    assert listed.json()["built_in_bases"][0]["stats"]["page_count"] is not None
 
     other = client.post(
         "/api/bases/create",

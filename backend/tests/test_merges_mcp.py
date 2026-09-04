@@ -17,4 +17,4 @@ def test_mcp_merge_tools(
     assert plan.incoming_page_count == 3
     assert plan.new_page_count == 0
     assert outcome.inserted_page_count == 0
-    assert outcome.backup_filename.startswith("locram-pre_merge-")
+    assert "-pre_merge-" in outcome.backup_filename

@@ -1,4 +1,9 @@
 from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
     get_link_repository,
     get_page_repository,
     get_smart_folder_repository,
@@ -9,12 +14,13 @@ from dependencies import get_smart_folder_service as load_smart_folder_service
 from interfaces.services.smart_folders import ISmartFolderService
 from schemas.smart_folders import (
     FilterPresetDeletedResponse,
+    FilterPresetListResponse,
     FilterPresetRecord,
     FilterState,
     SmartFolderGraph,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_smart_folder_service(
@@ -39,11 +45,17 @@ def get_smart_folder_service(
         page_repository,
         link_repository,
         load_link_service(link_repository, page_repository),
+        get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
     )
 
 
-def list_smart_folder_presets() -> list[FilterPresetRecord]:
-    return get_smart_folder_service().list_presets()
+def list_smart_folder_presets() -> FilterPresetListResponse:
+    return FilterPresetListResponse(items=get_smart_folder_service().list_presets())
 
 
 def get_smart_folder_preset(preset_id: str) -> FilterPresetRecord:
@@ -84,9 +96,12 @@ def get_smart_folder_graph(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(list_smart_folder_presets)
-    mcp.tool()(get_smart_folder_preset)
-    mcp.tool()(create_smart_folder_preset)
-    mcp.tool()(update_smart_folder_preset)
-    mcp.tool()(delete_smart_folder_preset)
-    mcp.tool()(get_smart_folder_graph)
+    register_tools(
+        mcp,
+        list_smart_folder_presets,
+        get_smart_folder_preset,
+        create_smart_folder_preset,
+        update_smart_folder_preset,
+        delete_smart_folder_preset,
+        get_smart_folder_graph,
+    )

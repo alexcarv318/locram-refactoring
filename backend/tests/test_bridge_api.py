@@ -22,7 +22,7 @@ def test_http_runtime_includes_active_base(
     response = client.get("/api/runtime")
 
     assert response.status_code == 200
-    assert response.json()["locram_home"] == str(database.host_state_path.parent)
+    assert response.json()["locram_home"] == str(database.locram_home)
     assert response.json()["db_path"] == created.path
     assert response.json()["active_base"]["entry_id"] == created.entry_id
     assert response.json()["active_base"]["display_name"] == "Notes"
@@ -47,6 +47,18 @@ def test_http_desktop_activation_is_unsigned_when_empty(client: TestClient) -> N
 
     assert response.status_code == 200
     assert response.json()["state"] == "free"
+    assert response.json()["edition"] == "free"
     assert response.json()["activationRequired"] is True
     assert response.json()["productName"] == "Locram"
     assert response.json()["lastAttempt"] is None
+    assert response.json()["usableCapabilities"]["multiBase"] is False
+
+
+def test_http_desktop_edition_is_free_when_unsigned(client: TestClient) -> None:
+    response = client.get("/api/desktop/edition")
+
+    assert response.status_code == 200
+    assert response.json()["edition"] == "free"
+    assert response.json()["productName"] == "Locram"
+    assert response.json()["capabilities"]["multiBase"] is False
+    assert response.json()["capabilities"]["shareBase"] is False

@@ -59,6 +59,9 @@ class IEmbeddingService(ABC):
     def run_embed(self, force: bool, limit: int) -> EmbedRunResult: ...
 
     @abstractmethod
+    def embed_page(self, page_id: str) -> None: ...
+
+    @abstractmethod
     def get_settings(self) -> EmbeddingSettings: ...
 
     @abstractmethod

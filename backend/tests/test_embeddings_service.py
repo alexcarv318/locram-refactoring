@@ -6,6 +6,7 @@ import database
 from interfaces.services.embeddings import IEmbeddingProvider
 from repositories.access import AccessRepository
 from repositories.embeddings import EmbeddingRepository
+from repositories.links import LinkRepository
 from repositories.pages import PageRepository
 from schemas.pages import PageCreate
 from services.embeddings import EmbeddingService
@@ -100,6 +101,36 @@ def test_hybrid_search_merges_semantic_hits(page_service: PageService, db: Sessi
 
     assert run.embedded >= 2
     assert run.model == "test-model"
+
+
+def test_create_page_embeds_when_provider_ready(db: Session) -> None:
+    embedding_service = EmbeddingService(
+        EmbeddingRepository(db),
+        PageRepository(db),
+        AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        ),
+        FakeEmbeddingProvider(),
+    )
+    page_service = PageService(
+        PageRepository(db),
+        LinkRepository(db),
+        embedding_service,
+    )
+    page = page_service.create_page(PageCreate(title="Alpha", content="alpha note"))
+
+    assert page.id not in embedding_service.find_unembedded(10, None).page_ids
+
+
+def test_create_page_succeeds_when_provider_is_not_ready(
+    embedding_service: EmbeddingService,
+    page_service: PageService,
+) -> None:
+    page = page_service.create_page(PageCreate(title="Alpha", content="alpha note"))
+
+    assert page.id in embedding_service.find_unembedded(10, None).page_ids
 
 
 def test_zero_vector_is_ignored(page_service: PageService, db: Session) -> None:

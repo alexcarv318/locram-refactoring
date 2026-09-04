@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
 
-def test_http_owner_grant_lifecycle(live_client: TestClient) -> None:
-    live_client.get("/api/bases")
-    created = live_client.post(
+def test_http_owner_grant_lifecycle(pro_client: TestClient) -> None:
+    pro_client.get("/api/bases")
+    created = pro_client.post(
         "/api/base-share-grants",
         json={
             "owner_actor_ref": "device:owner-one",
@@ -12,15 +12,15 @@ def test_http_owner_grant_lifecycle(live_client: TestClient) -> None:
         },
     )
     grant_id = created.json()["item"]["grant_id"]
-    listed = live_client.get(
+    listed = pro_client.get(
         "/api/base-share-grants/owner-view",
         params={"owner_actor_ref": "device:owner-one"},
     )
-    revoked = live_client.post(
+    revoked = pro_client.post(
         f"/api/base-share-grants/{grant_id}/revoke",
         json={"revocation_reason": "done"},
     )
-    deleted = live_client.post(f"/api/base-share-grants/{grant_id}/delete")
+    deleted = pro_client.post(f"/api/base-share-grants/{grant_id}/delete")
 
     assert created.status_code == 201
     assert created.json()["item"]["recipient_actor_ref"] == "account:alice"
@@ -33,9 +33,9 @@ def test_http_owner_grant_lifecycle(live_client: TestClient) -> None:
     assert deleted.json() == {"removed": True, "grant_id": grant_id}
 
 
-def test_http_invite_requires_enrollment(live_client: TestClient) -> None:
-    live_client.get("/api/bases")
-    created = live_client.post(
+def test_http_invite_after_enroll(pro_client: TestClient) -> None:
+    pro_client.get("/api/bases")
+    created = pro_client.post(
         "/api/base-share-grants",
         json={
             "owner_actor_ref": "device:owner-one",
@@ -44,21 +44,29 @@ def test_http_invite_requires_enrollment(live_client: TestClient) -> None:
         },
     )
     grant_id = created.json()["item"]["grant_id"]
-    invite = live_client.get(f"/api/base-share-grants/{grant_id}/invite")
-    recipients = live_client.get(
-        "/api/base-share-grants/recipient-view",
-        params={"recipient_actor_ref": "account:alice"},
-    )
-    visibility = live_client.post(
-        f"/api/base-share-grants/{grant_id}/mcp-visibility",
-        json={"visible_in_mcp": False},
+    invite = pro_client.get(f"/api/base-share-grants/{grant_id}/invite")
+    missing_grant = pro_client.post("/api/base-share-grants/missing/delete")
+
+    assert created.status_code == 201
+    assert invite.status_code == 200
+    assert invite.json()["item"]["grant_id"] == grant_id
+    assert missing_grant.status_code == 404
+
+
+def test_http_share_create_requires_pro(live_client: TestClient) -> None:
+    live_client.get("/api/bases")
+    created = live_client.post(
+        "/api/base-share-grants",
+        json={
+            "owner_actor_ref": "device:owner-one",
+            "recipient_account_id": "alice",
+            "permission": "read",
+        },
     )
     missing_owner = live_client.get("/api/base-share-grants/owner-view")
     missing_grant = live_client.post("/api/base-share-grants/missing/delete")
 
-    assert invite.status_code == 409
-    assert recipients.status_code == 200
-    assert recipients.json()["items"] == []
-    assert visibility.status_code == 404
+    assert created.status_code == 403
+    assert created.json()["code"] == "EDITION_CAPABILITY_DENIED"
     assert missing_owner.status_code == 422
     assert missing_grant.status_code == 404

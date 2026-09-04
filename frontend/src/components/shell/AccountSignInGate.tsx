@@ -1,7 +1,6 @@
 import { createPortal } from "react-dom";
 
 import { Modal, ModalContent } from "@/components/ui/Modal";
-import { PanelLoader } from "@/components/ui/PanelLoader";
 import type { useDesktopAccountGate } from "@/hooks/useDesktopAccountGate";
 import { useT } from "@/i18n/useT";
 import { settingsButtonClassName } from "@/lib/settings/settingsUi";
@@ -18,11 +17,9 @@ export function AccountSignInGate({ gate }: AccountSignInGateProps) {
   const {
     approvalUrl,
     beginSignIn,
-    cancelBrowserSignInWait,
     desktopActivationQuery,
     hasResolutionFailed,
-    isAwaitingBrowserSignIn,
-    isResolving,
+    queriesReady,
     requiresSignIn,
     retryResolution,
     signInMutation,
@@ -31,14 +28,18 @@ export function AccountSignInGate({ gate }: AccountSignInGateProps) {
   const lastAttempt = desktopActivationQuery.data?.lastAttempt;
   const lastAttemptFailed =
     lastAttempt?.state === "failed_retryable" || lastAttempt?.state === "failed_terminal";
+  const transferRequired = lastAttempt?.errorCode === "transfer_required";
   const signInError =
     signInMutation.error instanceof Error
       ? signInMutation.error.message
       : lastAttemptFailed
         ? lastAttempt.message
-        : null;
+        : transferRequired
+          ? lastAttempt.message
+          : null;
+  const signInDisabled = !queriesReady || signInMutation.isPending;
 
-  if (isResolving && hasResolutionFailed) {
+  if (hasResolutionFailed) {
     return createPortal(
       <div className="bg-background/80 fixed inset-0 z-[80] flex items-center justify-center backdrop-blur-sm">
         <div className="flex flex-col items-center px-6 py-8 text-center">
@@ -59,53 +60,8 @@ export function AccountSignInGate({ gate }: AccountSignInGateProps) {
     );
   }
 
-  if (isResolving) {
-    return createPortal(
-      <div className="bg-background/80 fixed inset-0 z-[80] flex items-center justify-center backdrop-blur-sm">
-        <PanelLoader
-          description={t("app.signInGate.loadingDescription")}
-          message={t("app.signInGate.loadingTitle")}
-          size="lg"
-        />
-      </div>,
-      document.body,
-    );
-  }
-
-  if (!requiresSignIn) {
+  if (!requiresSignIn && queriesReady) {
     return null;
-  }
-
-  if (isAwaitingBrowserSignIn) {
-    return createPortal(
-      <div className="bg-background/80 fixed inset-0 z-[80] flex items-center justify-center backdrop-blur-sm">
-        <div className="flex flex-col items-center px-6 py-8 text-center">
-          <PanelLoader
-            description={t("app.signInGate.browserActivationCheck")}
-            message={t("app.signInGate.waitingTitle")}
-            size="lg"
-          />
-          {approvalUrl ? (
-            <a
-              className="text-muted-foreground mt-6 text-sm underline"
-              href={approvalUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {t("app.signInGate.openSignInPage")}
-            </a>
-          ) : null}
-          <button
-            className={cn(settingsButtonClassName(false), SIGN_IN_BUTTON_WIDTH_CLASS, "mt-4 shrink-0")}
-            onClick={cancelBrowserSignInWait}
-            type="button"
-          >
-            <span className="block w-full truncate text-center">{t("common.cancel")}</span>
-          </button>
-        </div>
-      </div>,
-      document.body,
-    );
   }
 
   return (
@@ -122,11 +78,11 @@ export function AccountSignInGate({ gate }: AccountSignInGateProps) {
           <button
             aria-label={signInLabel}
             className={cn(
-              settingsButtonClassName(signInMutation.isPending),
+              settingsButtonClassName(signInDisabled),
               SIGN_IN_BUTTON_WIDTH_CLASS,
               "mt-8 shrink-0",
             )}
-            disabled={signInMutation.isPending}
+            disabled={signInDisabled}
             onClick={beginSignIn}
             type="button"
           >

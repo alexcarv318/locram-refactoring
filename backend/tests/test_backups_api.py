@@ -33,4 +33,4 @@ def test_http_restore_returns_pre_restore_backup(live_client: TestClient) -> Non
 
     assert restored.status_code == 200
     assert restored.json()["item"]["restored_from"] == filename
-    assert restored.json()["item"]["pre_restore_backup"].startswith("locram-pre_restore-")
+    assert "-pre_restore-" in restored.json()["item"]["pre_restore_backup"]

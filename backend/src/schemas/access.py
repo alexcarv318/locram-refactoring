@@ -46,6 +46,19 @@ class AccessConnectedHeaders:
         ).hexdigest()
 
 
+PRODUCTION_ENTITLEMENT_PUBLIC_KEY = "WOxSLGdhrjK5WpqLkefte3hyDp+IW6o8wbUMy7kK+lc="
+
+
+class DesktopCapability(StrEnum):
+    MULTI_BASE = "multi_base"
+    SHARE_BASE = "share_base"
+    MANAGED_PUBLIC_MCP = "managed_public_mcp"
+    LOCAL_MCP_TOOL_VISIBILITY = "local_mcp_tool_visibility"
+    AGENT_BASE_ADMINISTRATION = "agent_base_administration"
+    DOCS_GGL_UPDATES = "docs_ggl_updates"
+    MANAGED_UPDATES = "managed_updates"
+
+
 @dataclass(frozen=True)
 class AccessSettings:
     broker_base_url: str = "https://broker.locram.app"
@@ -57,6 +70,9 @@ class AccessSettings:
     owner_authorization_message_version: str = "locram-managed-public-owner-authorization-v1"
     base_share_invite_message_version: str = "locram-managed-public-base-share-invite-v1"
     connected_proxy_secret_field: str = "connected_proxy_secret"
+    entitlement_public_key: str = PRODUCTION_ENTITLEMENT_PUBLIC_KEY
+    entitlement_refresh_window_seconds: int = 86400
+    entitlement_refresh_cooldown_seconds: float = 30.0
     connected_headers: AccessConnectedHeaders = field(default_factory=AccessConnectedHeaders)
 
 
@@ -189,6 +205,7 @@ class AccessEnrollRequest(BaseModel):
     activation_session_id: str | None = None
     client_public_key: str | None = None
     client_private_key_pem: str | None = None
+    transfer_session_id: str | None = None
 
 
 class DesktopActivationAttemptRecord(BaseModel):
@@ -206,6 +223,8 @@ class DesktopActivationAttemptRecord(BaseModel):
     client_private_key_pem: str | None = None
     key_algorithm: str = "ed25519"
     transfer_session_id: str | None = None
+    broker_enrollment_token: str | None = None
+    broker_base_url: str | None = None
 
 
 class ProductActivationSession(BaseModel):
@@ -337,6 +356,30 @@ class BrokerAccountIdentity(BaseModel):
     account_id: str | None = None
 
 
+class EntitlementLeasePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    license_root_id: str | None = None
+    license_seat_id: str | None = None
+    edition: str | None = None
+    plan_code: str | None = None
+    device_id: str | None = None
+    credential_generation_id: str | None = None
+    issued_at: str | None = None
+    expires_at: str | None = None
+    grace_until: str | None = None
+    revoked_at: str | None = None
+    status: str | None = None
+
+
+class SignedEntitlementLease(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    payload: EntitlementLeasePayload
+    signature: str
+    key_id: str | None = None
+
+
 class BrokerEnrollResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -348,16 +391,27 @@ class BrokerEnrollResponse(BaseModel):
     public_mcp_url: str | None = None
     public_url: str | None = None
     credential_generation_id: str | None = None
-    credential_version: str | None = None
+    credential_version: int | str | None = None
     license_root_id: str | None = None
     license_seat_id: str | None = None
     account_identity: BrokerAccountIdentity | None = None
+    entitlement_lease: SignedEntitlementLease | None = None
+
+
+class BrokerLeaseRefreshResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: str | None = None
+    device_id: str | None = None
+    credential_generation_id: str | None = None
+    entitlement_lease: SignedEntitlementLease | None = None
 
 
 class BrokerErrorBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     error: str | None = None
+    transfer_session_id: str | None = None
 
 
 class BrokerItemsResponse(BaseModel):

@@ -7,13 +7,16 @@ from repositories.access import AccessRepository
 from schemas.access import (
     AccessCredentialRecord,
     AccessEnrollRequest,
-    AccessSettings,
     AccessShareSessionResolveRequest,
     AccessState,
+    BrokerEnrollResponse,
+    BrokerLeaseRefreshResponse,
     InviteMintRequest,
+    SignedEntitlementLease,
 )
 from schemas.sharing import ShareGrantPermission
 from services.access import AccessService
+from tests.entitlement import TEST_ACCESS_SETTINGS, signed_entitlement_lease
 
 
 class _QuietRelay(IAccessRelay):
@@ -34,8 +37,25 @@ class _QuietRelay(IAccessRelay):
 
 
 class _ActivationHttp:
-    def __init__(self) -> None:
+    def __init__(self, entitlement_lease: SignedEntitlementLease | None = None) -> None:
         self.posts: list[str] = []
+        self.entitlement_lease = (
+            signed_entitlement_lease() if entitlement_lease is None else entitlement_lease
+        )
+        self.enroll_status = 200
+        self.enroll_body: dict[str, str | int | dict[str, str]] = {
+            "device_id": "device-one",
+            "relay_url": "wss://broker.example.test/relay",
+            "relay_token": "relay-token",
+            "authorization_server_url": "https://broker.example.test",
+            "protected_resource_url": "https://device-one.locram.app/mcp",
+            "public_mcp_url": "https://device-one.locram.app/mcp",
+            "account_identity": {
+                "email": "ada@example.test",
+                "display_name": "Ada",
+                "account_id": "acct-one",
+            },
+        }
         self.redeem_body: dict[str, str | bool | int] = {
             "activation_session_id": "session-one",
             "status": "pending",
@@ -79,21 +99,25 @@ class _ActivationHttp:
             return httpx.Response(200, json=self.redeem_body)
 
         if url.endswith("/api/devices/enroll"):
+            if self.enroll_status >= 400:
+                return httpx.Response(self.enroll_status, json=self.enroll_body)
+
+            enrolled = BrokerEnrollResponse.model_validate(self.enroll_body).model_copy(
+                update={"entitlement_lease": self.entitlement_lease}
+            )
+
+            return httpx.Response(
+                self.enroll_status,
+                text=enrolled.model_dump_json(exclude_none=True),
+            )
+
+        if url.endswith("/api/devices/lease/refresh"):
             return httpx.Response(
                 200,
-                json={
-                    "device_id": "device-one",
-                    "relay_url": "wss://broker.example.test/relay",
-                    "relay_token": "relay-token",
-                    "authorization_server_url": "https://broker.example.test",
-                    "protected_resource_url": "https://device-one.locram.app/mcp",
-                    "public_mcp_url": "https://device-one.locram.app/mcp",
-                    "account_identity": {
-                        "email": "ada@example.test",
-                        "display_name": "Ada",
-                        "account_id": "acct-one",
-                    },
-                },
+                text=BrokerLeaseRefreshResponse(
+                    status="refreshed",
+                    entitlement_lease=self.entitlement_lease,
+                ).model_dump_json(exclude_none=True),
             )
 
         return httpx.Response(200, json={"status": "ok"})
@@ -281,7 +305,7 @@ def test_desktop_activation_enrolls_after_redeem() -> None:
         ),
         access_relay=_QuietRelay(),
         http_client=http_client,
-        settings=AccessSettings(),
+        settings=TEST_ACCESS_SETTINGS,
     )
     access_service.start_or_continue_desktop_activation(None)
     http_client.redeem_body = {
@@ -295,12 +319,84 @@ def test_desktop_activation_enrolls_after_redeem() -> None:
     identity = access_service.summary().account_identity
 
     assert completed.state == "active"
+    assert completed.edition == "pro"
     assert completed.activation_required is False
     assert completed.last_attempt is not None
     assert completed.last_attempt.state == "succeeded"
     assert identity is not None
     assert identity.email == "ada@example.test"
     assert any(url.endswith("/api/devices/enroll") for url in http_client.posts)
+
+
+def test_desktop_activation_keeps_pending_transfer_then_enrolls() -> None:
+    http_client = _ActivationHttp()
+    http_client.enroll_status = 409
+    http_client.enroll_body = {
+        "error": "transfer_required",
+        "transfer_session_id": "transfer-one",
+    }
+    access_service = AccessService(
+        access_repository=AccessRepository(
+            database.access_path,
+            database.access_credentials_path,
+            database.accepted_shares_path,
+        ),
+        access_relay=_QuietRelay(),
+        http_client=http_client,
+        settings=TEST_ACCESS_SETTINGS,
+    )
+    access_service.start_or_continue_desktop_activation(None)
+    http_client.redeem_body = {
+        "activation_session_id": "session-one",
+        "status": "redeemed",
+        "requires_broker_enrollment": True,
+        "broker_enrollment_token": "entitlement-one",
+        "broker_enroll_url": "https://broker.example.test/api/devices/enroll",
+    }
+    waiting = access_service.start_or_continue_desktop_activation(None)
+
+    assert waiting.last_attempt is not None
+    assert waiting.last_attempt.state == "pending"
+    assert waiting.last_attempt.error_code == "transfer_required"
+    assert waiting.last_attempt.transfer_session_id == "transfer-one"
+    assert waiting.last_attempt.approval_url is not None
+    assert "activation_transfer" in waiting.last_attempt.approval_url
+
+    http_client.enroll_body = {
+        "error": "transfer_required",
+        "transfer_session_id": "transfer-two",
+    }
+    updated = access_service.start_or_continue_desktop_activation(None)
+
+    assert updated.last_attempt is not None
+    assert updated.last_attempt.transfer_session_id == "transfer-two"
+    assert updated.last_attempt.approval_url is not None
+    assert "transfer-two" in updated.last_attempt.approval_url
+
+    http_client.enroll_status = 200
+    http_client.enroll_body = {
+        "device_id": "device-one",
+        "relay_url": "wss://broker.example.test/relay",
+        "relay_token": "relay-token",
+        "authorization_server_url": "https://broker.example.test",
+        "protected_resource_url": "https://device-one.locram.app/mcp",
+        "public_mcp_url": "https://device-one.locram.app/mcp",
+        "credential_version": 1,
+        "account_identity": {
+            "email": "ada@example.test",
+            "display_name": "Ada",
+            "account_id": "acct-one",
+        },
+    }
+    completed = access_service.start_or_continue_desktop_activation(None)
+    identity = access_service.summary().account_identity
+
+    assert completed.state == "active"
+    assert completed.edition == "pro"
+    assert completed.last_attempt is not None
+    assert completed.last_attempt.state == "succeeded"
+    assert identity is not None
+    assert identity.email == "ada@example.test"
 
 
 def test_desktop_activation_raises_when_product_api_is_down(

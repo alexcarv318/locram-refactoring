@@ -3,8 +3,8 @@ function isTauriWebview(): boolean {
 }
 
 function openWithWindow(url: string): boolean {
-  const openedWindow = window.open(url, "_blank", "noopener,noreferrer");
-  return openedWindow !== null;
+  window.open(url, "_blank", "noopener,noreferrer");
+  return true;
 }
 
 export async function openExternalUrl(url: string): Promise<boolean> {

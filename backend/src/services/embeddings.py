@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import ValidationError
 
@@ -20,7 +20,9 @@ from exceptions.pages import PageNotFoundError
 from interfaces.repositories.access import IAccessRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.embeddings import IEmbeddingProvider, IEmbeddingService
+from schemas.access import DesktopCapability
 from schemas.embeddings import (
     EmbeddingBootstrapResult,
     EmbeddingCoverage,
@@ -227,10 +229,12 @@ class EmbeddingService(IEmbeddingService):
         settings_path: Path | None = None,
         huggingface_api_key_path: Path | None = None,
         bootstrap_path: Path | None = None,
+        access_service: IAccessService | None = None,
     ) -> None:
         self._embedding_repository = embedding_repository
         self._page_repository = page_repository
         self._access_repository = access_repository
+        self._access_service = access_service
         self._fixed_provider = embedding_provider
         self._settings_path = settings_path or database.embedding_settings_path
         self._huggingface_api_key_path = (
@@ -348,32 +352,17 @@ class EmbeddingService(IEmbeddingService):
         failed = 0
 
         for page_id in page_ids:
-            page = self._page_repository.get(page_id)
+            result = self._store_page_embedding(page_id, provider)
 
-            if page is None or page.status is not PageStatus.ACTIVE:
+            if result == "embedded":
+                embedded += 1
+                continue
+
+            if result == "skipped":
                 skipped += 1
                 continue
 
-            try:
-                vector = provider.embed(self._embed_text(page.title, page.content))
-                self._embedding_repository.store(
-                    page.id,
-                    "content",
-                    self._pack(vector),
-                    model,
-                    len(vector),
-                    self._now(),
-                )
-            except (
-                EmbeddingProviderNotReadyError,
-                EmbeddingProviderError,
-                InvalidEmbeddingError,
-                struct.error,
-            ):
-                failed += 1
-                continue
-
-            embedded += 1
+            failed += 1
 
         return EmbedRunResult(
             embedded=embedded,
@@ -382,6 +371,17 @@ class EmbeddingService(IEmbeddingService):
             model=model,
         )
 
+    def embed_page(self, page_id: str) -> None:
+        if not self.get_settings().auto_embed:
+            return
+
+        provider = self.provider()
+
+        if not provider.ready:
+            return
+
+        self._store_page_embedding(page_id, provider)
+
     def get_settings(self) -> EmbeddingSettings:
         settings, _api_key = self._load_settings()
 
@@ -389,6 +389,10 @@ class EmbeddingService(IEmbeddingService):
 
     def update_settings(self, payload: EmbeddingSettingsPatch) -> EmbeddingSettings:
         settings, api_key = self._load_settings()
+
+        if payload.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+            self._deny_without_hosted()
+
         updates = payload.model_dump(
             exclude_unset=True,
             exclude={"huggingface_api_key", "clear_huggingface_api_key"},
@@ -440,6 +444,7 @@ class EmbeddingService(IEmbeddingService):
         settings = self.get_settings()
 
         if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+            self._deny_without_hosted()
             self._hosted_bootstrap(settings)
 
         provider = self.provider()
@@ -451,6 +456,36 @@ class EmbeddingService(IEmbeddingService):
                 f"ready={provider.ready}",
             ]
         )
+
+    def _store_page_embedding(
+        self,
+        page_id: str,
+        provider: IEmbeddingProvider,
+    ) -> Literal["embedded", "skipped", "failed"]:
+        page = self._page_repository.get(page_id)
+
+        if page is None or page.status is not PageStatus.ACTIVE:
+            return "skipped"
+
+        try:
+            vector = provider.embed(self._embed_text(page.title, page.content))
+            self._embedding_repository.store(
+                page.id,
+                "content",
+                self._pack(vector),
+                provider.model,
+                len(vector),
+                self._now(),
+            )
+        except (
+            EmbeddingProviderNotReadyError,
+            EmbeddingProviderError,
+            InvalidEmbeddingError,
+            struct.error,
+        ):
+            return "failed"
+
+        return "embedded"
 
     def provider(self) -> IEmbeddingProvider:
         if self._fixed_provider is not None:
@@ -464,7 +499,7 @@ class EmbeddingService(IEmbeddingService):
         if settings.provider is EmbeddingProviderKind.HUGGINGFACE and api_key != "":
             return HuggingFaceEmbeddingProvider(api_key, settings.model)
 
-        if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED:
+        if settings.provider is EmbeddingProviderKind.LOCRAM_HOSTED and self._hosted_allowed():
             hosted = self._hosted_provider(settings)
 
             if hosted is not None:
@@ -703,6 +738,18 @@ class EmbeddingService(IEmbeddingService):
         ordered = sorted(hits.values(), key=lambda item: scores[item.id], reverse=True)
 
         return ordered[:limit]
+
+    def _hosted_allowed(self) -> bool:
+        if self._access_service is None:
+            return True
+
+        return self._access_service.has_capability(DesktopCapability.MANAGED_PUBLIC_MCP)
+
+    def _deny_without_hosted(self) -> None:
+        if self._access_service is None:
+            return
+
+        self._access_service.deny_without_capability(DesktopCapability.MANAGED_PUBLIC_MCP)
 
     def _active_model(self) -> str | None:
         provider = self.provider()

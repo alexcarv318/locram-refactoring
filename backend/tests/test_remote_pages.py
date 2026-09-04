@@ -193,7 +193,7 @@ def test_shared_base_lists_pages_over_http(
     )
     monkeypatch.setattr("dependencies.get_access_http_client", lambda: fake)
     listed = live_client.get(
-        f"/api/pages?base_ref=shared:{created.grant_id}&recipient_actor_ref=account:alice"
+        f"/api/pages?base_ref=shared:{created.grant_id}&recipient_account_id=alice"
     )
 
     assert listed.status_code == 200

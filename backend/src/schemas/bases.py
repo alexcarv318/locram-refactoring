@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
+from schemas.backups import KnowledgeFileStats
+
 
 class AgentAccessMode(StrEnum):
     WRITE = "write"
@@ -21,6 +23,16 @@ class RegistryEntryRecord(BaseModel):
     created_at: str
     updated_at: str
     visible_in_mcp: bool
+    base_kind: str | None = "user"
+    artifact_kind: str | None = None
+    file_role: str | None = "ordinary_base"
+    open_result: str | None = "openable"
+    open_detail: str | None = None
+    registered_at: str | None = None
+    last_opened_at: str | None = None
+    last_open_succeeded_at: str | None = None
+    last_open_error: str | None = None
+    stats: KnowledgeFileStats | None = None
 
 
 class BaseRegisterRequest(BaseModel):
@@ -95,7 +107,7 @@ class ManagedBaseSummaryRecord(BaseModel):
     remote_manifest_url: str | None
     remote_artifact_url: str | None
     refresh_configured: bool
-    stats: None = None
+    stats: KnowledgeFileStats | None = None
 
 
 class ManagedBaseSummaryResponse(BaseModel):

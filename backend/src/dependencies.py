@@ -18,10 +18,12 @@ from interfaces.repositories.changes import IChangeRepository
 from interfaces.repositories.embeddings import IEmbeddingRepository
 from interfaces.repositories.exports import IExportRepository
 from interfaces.repositories.links import ILinkRepository
+from interfaces.repositories.mcp_tools import IMcpToolVisibilityRepository
 from interfaces.repositories.merges import IMergeRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.repositories.sharing import IShareSession, ISharingRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
+from interfaces.repositories.user_settings import IUserSettingsRepository
 from interfaces.services.access import AccessHttpClient, IAccessRelay, IAccessService
 from interfaces.services.attachments import IAttachmentService
 from interfaces.services.backups import IBackupService
@@ -31,10 +33,12 @@ from interfaces.services.changes import IChangeService
 from interfaces.services.embeddings import IEmbeddingService
 from interfaces.services.exports import IExportService
 from interfaces.services.links import ILinkService
+from interfaces.services.mcp_tools import IMcpToolService
 from interfaces.services.merges import IMergeService
 from interfaces.services.pages import IPageService
 from interfaces.services.sharing import ISharingService
 from interfaces.services.smart_folders import ISmartFolderService
+from interfaces.services.user_settings import IUserSettingsService
 from repositories.access import AccessRepository
 from repositories.backups import BackupRepository
 from repositories.bases import BaseRegistryRepository, ManagedBaseRepository
@@ -42,11 +46,13 @@ from repositories.changes import ChangeRepository
 from repositories.embeddings import EmbeddingRepository
 from repositories.exports import ExportRepository
 from repositories.links import LinkRepository, RemoteLinkRepository
+from repositories.mcp_tools import McpToolVisibilityRepository
 from repositories.merges import MergeRepository
 from repositories.pages import PageRepository, RemotePageRepository
 from repositories.sharing import ShareSession, SharingRepository
 from repositories.smart_folders import SmartFolderRepository
-from schemas.access import AccessSettings
+from repositories.user_settings import UserSettingsRepository
+from schemas.access import PRODUCTION_ENTITLEMENT_PUBLIC_KEY, AccessSettings
 from schemas.bases import WorkingBaseRecord
 from services.access import AccessRelay, AccessService
 from services.attachments import AttachmentService
@@ -57,10 +63,12 @@ from services.changes import ChangeService
 from services.embeddings import EmbeddingService
 from services.exports import ExportService
 from services.links import LinkService
+from services.mcp_tools import McpToolService
 from services.merges import MergeService
 from services.pages import PageService
 from services.sharing import SharingService
 from services.smart_folders import SmartFolderService
+from services.user_settings import UserSettingsService
 
 
 @lru_cache
@@ -110,6 +118,10 @@ def get_access_repository() -> IAccessRepository:
 def get_access_settings() -> AccessSettings:
     return AccessSettings(
         product_api_url=environ.get("LOCRAM_PRODUCT_API_URL", "https://api.locram.app").rstrip("/"),
+        entitlement_public_key=environ.get(
+            "LOCRAM_DESKTOP_ENTITLEMENT_PUBLIC_KEY",
+            PRODUCTION_ENTITLEMENT_PUBLIC_KEY,
+        ),
     )
 
 
@@ -209,6 +221,7 @@ def get_db(base_ref: str | None = Query(default=None)) -> Iterator[Session]:
 def get_share_session(
     base_ref: str | None = Query(default=None),
     recipient_actor_ref: str | None = Query(default=None),
+    recipient_account_id: str | None = Query(default=None),
 ) -> IShareSession | None:
     working_base = get_working_base(base_ref=base_ref, write=False)
 
@@ -221,6 +234,10 @@ def get_share_session(
         raise WorkingBaseNotFoundError(working_base.base_ref)
 
     actor_ref = (recipient_actor_ref or "").strip()
+    account_id = (recipient_account_id or "").strip()
+
+    if actor_ref == "" and account_id != "":
+        actor_ref = f"account:{account_id}"
 
     if actor_ref == "":
         actor_ref = share.recipient_actor_ref
@@ -231,10 +248,12 @@ def get_share_session(
 def get_page_repository(
     base_ref: str | None = Query(default=None),
     recipient_actor_ref: str | None = Query(default=None),
+    recipient_account_id: str | None = Query(default=None),
 ) -> IPageRepository:
     session = get_share_session(
         base_ref=base_ref,
         recipient_actor_ref=recipient_actor_ref,
+        recipient_account_id=recipient_account_id,
     )
 
     if session is not None:
@@ -246,10 +265,12 @@ def get_page_repository(
 def get_link_repository(
     base_ref: str | None = Query(default=None),
     recipient_actor_ref: str | None = Query(default=None),
+    recipient_account_id: str | None = Query(default=None),
 ) -> ILinkRepository:
     session = get_share_session(
         base_ref=base_ref,
         recipient_actor_ref=recipient_actor_ref,
+        recipient_account_id=recipient_account_id,
     )
 
     if session is not None:
@@ -280,11 +301,52 @@ def get_smart_folder_repository() -> ISmartFolderRepository:
     return SmartFolderRepository(database.filter_presets_path)
 
 
+def get_local_embedding_service(
+    base_ref: str | None = Query(default=None),
+    recipient_actor_ref: str | None = Query(default=None),
+    recipient_account_id: str | None = Query(default=None),
+) -> IEmbeddingService | None:
+    if recipient_actor_ref is not None or recipient_account_id is not None:
+        return None
+
+    if base_ref is not None and not base_ref.startswith("local:"):
+        return None
+
+    if get_share_session(
+        base_ref=base_ref,
+        recipient_actor_ref=recipient_actor_ref,
+        recipient_account_id=recipient_account_id,
+    ) is not None:
+        return None
+
+    return get_embedding_service(
+        embedding_repository=get_embedding_repository(
+            db=get_session(base_ref=base_ref, write=False)
+        ),
+        page_repository=get_page_repository(
+            base_ref=base_ref,
+            recipient_actor_ref=recipient_actor_ref,
+            recipient_account_id=recipient_account_id,
+        ),
+        access_service=get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
+    )
+
+
 def get_page_service(
     page_repository: IPageRepository = Depends(get_page_repository),
     link_repository: ILinkRepository = Depends(get_link_repository),
+    embedding_service: IEmbeddingService | None = Depends(get_local_embedding_service),
 ) -> IPageService:
-    return PageService(page_repository=page_repository, link_repository=link_repository)
+    return PageService(
+        page_repository=page_repository,
+        link_repository=link_repository,
+        embedding_service=embedding_service,
+    )
 
 
 def get_link_service(
@@ -300,13 +362,41 @@ def get_change_service(
     return ChangeService(change_repository=change_repository)
 
 
+def get_mcp_tool_visibility_repository() -> IMcpToolVisibilityRepository:
+    return McpToolVisibilityRepository(database.mcp_tool_visibility_path)
+
+
+def get_mcp_tool_service(
+    mcp_tool_visibility_repository: IMcpToolVisibilityRepository = Depends(
+        get_mcp_tool_visibility_repository
+    ),
+    access_service: IAccessService = Depends(get_access_service),
+) -> IMcpToolService:
+    return McpToolService(
+        mcp_tool_visibility_repository=mcp_tool_visibility_repository,
+        access_service=access_service,
+    )
+
+
+def get_user_settings_repository() -> IUserSettingsRepository:
+    return UserSettingsRepository(database.desktop_user_settings_path)
+
+
+def get_user_settings_service(
+    user_settings_repository: IUserSettingsRepository = Depends(get_user_settings_repository),
+) -> IUserSettingsService:
+    return UserSettingsService(user_settings_repository=user_settings_repository)
+
+
 def get_bridge_service(
     base_registry_service: IBaseRegistryService = Depends(get_base_registry_service),
     access_service: IAccessService = Depends(get_access_service),
+    mcp_tool_service: IMcpToolService = Depends(get_mcp_tool_service),
 ) -> IBridgeService:
     return BridgeService(
         base_registry_service=base_registry_service,
         access_service=access_service,
+        mcp_tool_service=mcp_tool_service,
     )
 
 
@@ -335,11 +425,13 @@ def get_export_repository(base_ref: str | None, write: bool) -> IExportRepositor
 def get_embedding_service(
     embedding_repository: IEmbeddingRepository = Depends(get_embedding_repository),
     page_repository: IPageRepository = Depends(get_page_repository),
+    access_service: IAccessService = Depends(get_access_service),
 ) -> IEmbeddingService:
     return EmbeddingService(
         embedding_repository=embedding_repository,
         page_repository=page_repository,
         access_repository=get_access_repository(),
+        access_service=access_service,
     )
 
 
@@ -348,24 +440,28 @@ def get_smart_folder_service(
     page_repository: IPageRepository = Depends(get_page_repository),
     link_repository: ILinkRepository = Depends(get_link_repository),
     link_service: ILinkService = Depends(get_link_service),
+    access_service: IAccessService = Depends(get_access_service),
 ) -> ISmartFolderService:
     return SmartFolderService(
         smart_folder_repository=smart_folder_repository,
         page_repository=page_repository,
         link_repository=link_repository,
         link_service=link_service,
+        access_service=access_service,
     )
 
 
 def get_export_service(
     page_repository: IPageRepository = Depends(get_page_repository),
     smart_folder_service: ISmartFolderService = Depends(get_smart_folder_service),
+    access_service: IAccessService = Depends(get_access_service),
     base_ref: str | None = Query(default=None),
 ) -> IExportService:
     return ExportService(
         export_repository=get_export_repository(base_ref=base_ref, write=False),
         page_repository=page_repository,
         smart_folder_service=smart_folder_service,
+        access_service=access_service,
     )
 
 
@@ -374,12 +470,14 @@ def get_merge_service(
     page_repository: IPageRepository = Depends(get_page_repository),
     link_repository: ILinkRepository = Depends(get_link_repository),
     backup_service: IBackupService = Depends(get_backup_service),
+    access_service: IAccessService = Depends(get_access_service),
 ) -> IMergeService:
     return MergeService(
         merge_repository=merge_repository,
         page_repository=page_repository,
         link_repository=link_repository,
         backup_service=backup_service,
+        access_service=access_service,
     )
 
 

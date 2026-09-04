@@ -5,10 +5,12 @@ from ulid import ULID
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.merges import IMergeRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.backups import IBackupService
 from interfaces.services.merges import IMergeService
 from models.links import Link
 from models.pages import Page
+from schemas.access import DesktopCapability
 from schemas.links import LinkType
 from schemas.merges import (
     MergeConflict,
@@ -28,13 +30,16 @@ class MergeService(IMergeService):
         page_repository: IPageRepository,
         link_repository: ILinkRepository,
         backup_service: IBackupService,
+        access_service: IAccessService | None = None,
     ) -> None:
         self._merge_repository = merge_repository
         self._page_repository = page_repository
         self._link_repository = link_repository
         self._backup_service = backup_service
+        self._access_service = access_service
 
     def plan(self, path: str) -> MergePlan:
+        self._deny_without_multi_base()
         source = self._merge_repository.read_source(Path(path))
         target_base_id, target_display_name = self._merge_repository.get_target_base()
         blocked: list[MergeConflict] = []
@@ -203,6 +208,12 @@ class MergeService(IMergeService):
                 return True
 
         return False
+
+    def _deny_without_multi_base(self) -> None:
+        if self._access_service is None:
+            return
+
+        self._access_service.deny_without_capability(DesktopCapability.MULTI_BASE)
 
     @staticmethod
     def _to_page(page: MergePage, parent_id: str | None) -> Page:

@@ -15,10 +15,12 @@ from api.changes import changes_router
 from api.embeddings import desktop_embeddings_router, embeddings_router
 from api.exports import exports_router
 from api.links import links_router
+from api.mcp_tools import mcp_tools_router
 from api.merges import merges_router
 from api.pages import pages_router
 from api.sharing import sharing_router
 from api.smart_folders import notes_router, presets_router
+from api.user_settings import user_settings_router
 from exceptions.app import AppError
 from mcp_server.main import mcp_server
 
@@ -48,14 +50,18 @@ app.include_router(presets_router)
 app.include_router(notes_router)
 app.include_router(embeddings_router)
 app.include_router(desktop_embeddings_router)
+app.include_router(mcp_tools_router)
+app.include_router(user_settings_router)
 
 
 @app.exception_handler(AppError)
 async def handle_app_error(_request: Request, error: AppError) -> JSONResponse:
-    return JSONResponse(
-        status_code=error.status_code,
-        content={"detail": str(error), "error": str(error)},
-    )
+    content = {"detail": str(error), "error": str(error)}
+
+    if error.code is not None:
+        content["code"] = error.code
+
+    return JSONResponse(status_code=error.status_code, content=content)
 
 
 def mount_mcp_http(application: FastAPI) -> None:

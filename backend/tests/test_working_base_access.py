@@ -9,6 +9,7 @@ from exceptions.bases import (
     WorkingBaseReadOnlyError,
 )
 from schemas.bases import AgentAccessMode
+from services.access import AccessService
 from services.bases import BaseRegistryService
 
 
@@ -82,6 +83,7 @@ def test_http_write_to_read_base_is_forbidden(
 
 def test_http_read_uses_base_ref(
     live_client: TestClient,
+    enrolled_access: AccessService,
     base_registry_service: BaseRegistryService,
     tmp_path: Path,
 ) -> None:

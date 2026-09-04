@@ -3,8 +3,10 @@ from pathlib import Path
 from exceptions.exports import ExportEmptyError, ExportNotFoundError, ExportScopeError
 from interfaces.repositories.exports import IExportRepository
 from interfaces.repositories.pages import IPageRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.exports import IExportService
 from interfaces.services.smart_folders import ISmartFolderService
+from schemas.access import DesktopCapability
 from schemas.exports import (
     ArtifactInspection,
     ExportDeletedResponse,
@@ -21,12 +23,15 @@ class ExportService(IExportService):
         export_repository: IExportRepository,
         page_repository: IPageRepository,
         smart_folder_service: ISmartFolderService,
+        access_service: IAccessService | None = None,
     ) -> None:
         self._export_repository = export_repository
         self._page_repository = page_repository
         self._smart_folder_service = smart_folder_service
+        self._access_service = access_service
 
     def export_subgraph(self, scope: ExportScope) -> ExportResult:
+        self._deny_without_multi_base()
         page_ids = self._resolve_scope(scope)
 
         if not page_ids:
@@ -44,9 +49,11 @@ class ExportService(IExportService):
         )
 
     def list_exports(self) -> list[ExportRecord]:
+        self._deny_without_multi_base()
         return self._export_repository.list_exports()
 
     def delete_export(self, filename: str) -> ExportDeletedResponse:
+        self._deny_without_multi_base()
         deleted = self._export_repository.delete(filename)
 
         if not deleted:
@@ -62,10 +69,18 @@ class ExportService(IExportService):
         raise ExportNotFoundError(artifact_id)
 
     def rename_export(self, filename: str, new_filename: str) -> ExportRecord:
+        self._deny_without_multi_base()
         return self._export_repository.rename(filename, new_filename)
 
     def inspect_artifact(self, path: str) -> ArtifactInspection:
+        self._deny_without_multi_base()
         return self._export_repository.inspect(Path(path))
+
+    def _deny_without_multi_base(self) -> None:
+        if self._access_service is None:
+            return
+
+        self._access_service.deny_without_capability(DesktopCapability.MULTI_BASE)
 
     def _resolve_scope(self, scope: ExportScope) -> list[str]:
         if scope.page_ids:

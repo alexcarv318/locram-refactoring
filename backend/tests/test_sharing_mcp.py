@@ -14,7 +14,7 @@ def test_mcp_sharing_tools(mcp_sharing_service: SharingService) -> None:
     deleted = mcp_sharing.sharing_delete_grant(created.grant_id)
 
     assert created.recipient_actor_ref == "account:alice"
-    assert [item.grant_id for item in items] == [created.grant_id]
+    assert [item.grant_id for item in items.items] == [created.grant_id]
     assert revoked.revoked_at is not None
     assert deleted.removed is True
-    assert mcp_sharing.sharing_list_owner_grants(owner_actor_ref="device:owner-one") == []
+    assert mcp_sharing.sharing_list_owner_grants(owner_actor_ref="device:owner-one").items == []

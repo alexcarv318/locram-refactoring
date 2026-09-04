@@ -1,4 +1,9 @@
-from dependencies import get_link_repository, get_page_repository, get_working_base
+from dependencies import (
+    get_link_repository,
+    get_local_embedding_service,
+    get_page_repository,
+    get_working_base,
+)
 from dependencies import get_link_service as load_link_service
 from dependencies import get_page_service as load_page_service
 from interfaces.services.links import ILinkService
@@ -12,7 +17,7 @@ from schemas.links import (
     UnlinkedPagesResponse,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_link_service(
@@ -40,6 +45,10 @@ def get_page_service(
     return load_page_service(
         get_page_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
         get_link_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+        get_local_embedding_service(
+            base_ref=base_ref,
+            recipient_actor_ref=recipient_actor_ref,
+        ),
     )
 
 
@@ -97,7 +106,4 @@ def set_parent(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(link_pages)
-    mcp.tool()(unlink_pages)
-    mcp.tool()(batch_link)
-    mcp.tool()(set_parent)
+    register_tools(mcp, link_pages, unlink_pages, batch_link, set_parent)

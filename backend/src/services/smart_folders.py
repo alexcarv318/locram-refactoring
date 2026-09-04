@@ -9,8 +9,10 @@ from exceptions.smart_folders import (
 from interfaces.repositories.links import ILinkRepository
 from interfaces.repositories.pages import IPageRepository
 from interfaces.repositories.smart_folders import ISmartFolderRepository
+from interfaces.services.access import IAccessService
 from interfaces.services.links import ILinkService
 from interfaces.services.smart_folders import ISmartFolderService
+from schemas.access import DesktopCapability
 from schemas.pages import PageStatus, PageSummary
 from schemas.smart_folders import (
     BUILT_IN_SCOPE_IDS,
@@ -33,7 +35,6 @@ from schemas.smart_folders import (
     NotesSummariesResponse,
     PageIdMode,
     RuleJoiner,
-    SelectionEncoding,
     SmartFolderGraph,
     SmartFolderGraphNode,
 )
@@ -46,11 +47,13 @@ class SmartFolderService(ISmartFolderService):
         page_repository: IPageRepository,
         link_repository: ILinkRepository,
         link_service: ILinkService,
+        access_service: IAccessService | None = None,
     ) -> None:
         self._smart_folder_repository = smart_folder_repository
         self._page_repository = page_repository
         self._link_repository = link_repository
         self._link_service = link_service
+        self._access_service = access_service
 
     def list_presets(self) -> list[FilterPresetRecord]:
         return self._smart_folder_repository.list_presets()
@@ -64,6 +67,7 @@ class SmartFolderService(ISmartFolderService):
         return preset
 
     def create_preset(self, name: str, filter_state: FilterState) -> FilterPresetRecord:
+        self._deny_without_multi_base()
         trimmed = name.strip()
 
         if trimmed == "":
@@ -77,6 +81,7 @@ class SmartFolderService(ISmartFolderService):
         name: str | None,
         filter_state: FilterState | None,
     ) -> FilterPresetRecord:
+        self._deny_without_multi_base()
         trimmed = name.strip() if name is not None else None
 
         if trimmed == "":
@@ -93,6 +98,7 @@ class SmartFolderService(ISmartFolderService):
         return updated
 
     def delete_preset(self, preset_id: str) -> FilterPresetDeletedResponse:
+        self._deny_without_multi_base()
         deleted = self._smart_folder_repository.delete_preset(preset_id)
 
         if not deleted:
@@ -283,29 +289,16 @@ class SmartFolderService(ISmartFolderService):
         except ValueError:
             return False
 
-        if base_date.tzinfo is None:
-            base_date = base_date.replace(tzinfo=UTC)
-        else:
-            base_date = base_date.astimezone(UTC)
+        base_date = (
+            base_date.replace(tzinfo=UTC)
+            if base_date.tzinfo is None
+            else base_date.astimezone(UTC)
+        )
 
         return base_date + timedelta(days=summary.review_interval_days) <= now
 
     def matches_filter(self, summary: PageSummary, filter_state: FilterState) -> bool:
         if not self._matches_page_ids(summary.id, filter_state):
-            return False
-
-        if (
-            filter_state.selection_encoding is SelectionEncoding.EXPLICIT
-            and "types" in filter_state.model_fields_set
-            and not filter_state.types
-        ):
-            return False
-
-        if (
-            filter_state.selection_encoding is SelectionEncoding.EXPLICIT
-            and "statuses" in filter_state.model_fields_set
-            and not filter_state.statuses
-        ):
             return False
 
         if filter_state.types and summary.type.value not in filter_state.types:
@@ -438,3 +431,9 @@ class SmartFolderService(ISmartFolderService):
             return all(value not in lowered_candidates for value in lowered_values)
 
         return any(value in lowered_candidates for value in lowered_values)
+
+    def _deny_without_multi_base(self) -> None:
+        if self._access_service is None:
+            return
+
+        self._access_service.deny_without_capability(DesktopCapability.MULTI_BASE)

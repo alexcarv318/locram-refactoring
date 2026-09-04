@@ -12,6 +12,14 @@ import type {
   RestoreResult,
 } from "@/types";
 
+function withBaseRef(path: string, baseRef?: string): string {
+  if (!baseRef) {
+    return path;
+  }
+  const params = new URLSearchParams({ base_ref: baseRef });
+  return path.includes("?") ? `${path}&${params.toString()}` : `${path}?${params.toString()}`;
+}
+
 function normalizeAgentAccessMode(
   item: BaseRegistryEntry,
 ): AgentAccessMode {
@@ -178,10 +186,11 @@ export async function refreshManagedBase(
 export async function deleteBackup(
   baseUrl: string,
   filename: string,
+  baseRef?: string,
 ): Promise<{ deleted: boolean; filename: string }> {
   return bridgeClient.delete<{ deleted: boolean; filename: string }>(
     baseUrl,
-    `/api/backups/${encodeURIComponent(filename)}`,
+    withBaseRef(`/api/backups/${encodeURIComponent(filename)}`, baseRef),
   );
 }
 
@@ -189,27 +198,39 @@ export async function renameBackup(
   baseUrl: string,
   filename: string,
   newFilename: string,
+  baseRef?: string,
 ): Promise<BackupSummary> {
   const json = await bridgeClient.put<{ item: BackupSummary }>(
     baseUrl,
-    `/api/backups/${encodeURIComponent(filename)}/rename`,
+    withBaseRef(`/api/backups/${encodeURIComponent(filename)}/rename`, baseRef),
     { filename: newFilename },
   );
   return json.item;
 }
 
-export async function fetchBackups(baseUrl: string): Promise<BackupSummary[]> {
-  const payload = await bridgeClient.get<{ items: BackupSummary[] }>(baseUrl, "/api/backups");
+export async function fetchBackups(
+  baseUrl: string,
+  baseRef?: string,
+): Promise<BackupSummary[]> {
+  const payload = await bridgeClient.get<{ items: BackupSummary[] }>(
+    baseUrl,
+    withBaseRef("/api/backups", baseRef),
+  );
   return payload.items;
 }
 
 export async function createBackup(
   baseUrl: string,
   trigger = "manual",
+  baseRef?: string,
 ): Promise<BackupSummary> {
-  const json = await bridgeClient.post<{ item: BackupSummary }>(baseUrl, "/api/backups", {
-    trigger,
-  });
+  const json = await bridgeClient.post<{ item: BackupSummary }>(
+    baseUrl,
+    withBaseRef("/api/backups", baseRef),
+    {
+      trigger,
+    },
+  );
   return json.item;
 }
 
@@ -217,6 +238,7 @@ export async function restoreBackup(
   baseUrl: string,
   request: string | { filename?: string; path?: string; allowBaseReplacement?: boolean },
   allowBaseReplacement = false,
+  baseRef?: string,
 ): Promise<RestoreResult> {
   const payload =
     typeof request === "string"
@@ -235,7 +257,7 @@ export async function restoreBackup(
           };
   const json = await bridgeClient.post<{ item: RestoreResult }>(
     baseUrl,
-    "/api/backups/restore",
+    withBaseRef("/api/backups/restore", baseRef),
     payload,
   );
   return json.item;
@@ -250,19 +272,27 @@ export async function inspectArtifact(baseUrl: string, path: string): Promise<Ar
   return json.item;
 }
 
-export async function fetchMergePlan(baseUrl: string, path: string): Promise<MergePlanSummary> {
+export async function fetchMergePlan(
+  baseUrl: string,
+  path: string,
+  baseRef?: string,
+): Promise<MergePlanSummary> {
   const json = await bridgeClient.post<{ item: MergePlanSummary }>(
     baseUrl,
-    "/api/merges/plan",
+    withBaseRef("/api/merges/plan", baseRef),
     { path },
   );
   return json.item;
 }
 
-export async function executeMerge(baseUrl: string, path: string): Promise<MergeOutcomeSummary> {
+export async function executeMerge(
+  baseUrl: string,
+  path: string,
+  baseRef?: string,
+): Promise<MergeOutcomeSummary> {
   const json = await bridgeClient.post<{ item: MergeOutcomeSummary }>(
     baseUrl,
-    "/api/merges/execute",
+    withBaseRef("/api/merges/execute", baseRef),
     { path },
   );
   return json.item;
@@ -284,28 +314,50 @@ export type ExportSummary = {
   provenance_summary: string | null;
 };
 
-export async function fetchExports(baseUrl: string): Promise<ExportSummary[]> {
-  const payload = await bridgeClient.get<{ items: ExportSummary[] }>(baseUrl, "/api/exports");
+export async function fetchExports(
+  baseUrl: string,
+  baseRef?: string,
+): Promise<ExportSummary[]> {
+  const payload = await bridgeClient.get<{ items: ExportSummary[] }>(
+    baseUrl,
+    withBaseRef("/api/exports", baseRef),
+  );
   return payload.items;
 }
 
-export async function exportSubgraph(baseUrl: string, request: ExportRequest): Promise<ExportResult> {
-  const json = await bridgeClient.post<{ item: ExportResult }>(baseUrl, "/api/export", request);
+export async function exportSubgraph(
+  baseUrl: string,
+  request: ExportRequest,
+  baseRef?: string,
+): Promise<ExportResult> {
+  const json = await bridgeClient.post<{ item: ExportResult }>(
+    baseUrl,
+    withBaseRef("/api/export", baseRef),
+    request,
+  );
   return json.item;
 }
 
-export async function deleteExport(baseUrl: string, filename: string): Promise<void> {
-  await bridgeClient.delete(baseUrl, `/api/exports/${encodeURIComponent(filename)}`);
+export async function deleteExport(
+  baseUrl: string,
+  filename: string,
+  baseRef?: string,
+): Promise<void> {
+  await bridgeClient.delete(
+    baseUrl,
+    withBaseRef(`/api/exports/${encodeURIComponent(filename)}`, baseRef),
+  );
 }
 
 export async function renameExport(
   baseUrl: string,
   filename: string,
   newFilename: string,
+  baseRef?: string,
 ): Promise<ExportSummary> {
   const json = await bridgeClient.put<{ item: ExportSummary }>(
     baseUrl,
-    `/api/exports/${encodeURIComponent(filename)}/rename`,
+    withBaseRef(`/api/exports/${encodeURIComponent(filename)}/rename`, baseRef),
     { filename: newFilename },
   );
   return json.item;

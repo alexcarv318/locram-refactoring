@@ -19,16 +19,21 @@ def test_mcp_base_and_working_base_tools(
     renamed = mcp_bases.base_rename_base(created.entry_id, "Vault Two")
 
     assert created.display_name == "Vault"
-    assert [item.entry_id for item in listed if item.kind == "local"] == [created.entry_id]
+    assert [item.entry_id for item in listed.items if item.kind == "local"] == [created.entry_id]
     assert current is not None
     assert current.base_ref == f"local:{created.entry_id}"
     assert selected.is_current_working_base is True
     assert renamed.display_name == "Vault Two"
 
     spare = mcp_bases.base_create_base("Spare", str(tmp_path / "spare.db"), activate=False)
-    mcp_bases.base_unregister_base(spare.entry_id)
+    unregistered = mcp_bases.base_unregister_base(spare.entry_id)
     again = mcp_bases.base_register_base(spare.path, activate=False)
-    mcp_bases.base_delete_base(again.entry_id, force=False)
+    deleted = mcp_bases.base_delete_base(again.entry_id, force=False)
+
+    assert unregistered.removed is True
+    assert unregistered.entry_id == spare.entry_id
+    assert deleted.deleted is True
+    assert deleted.path == again.path
 
 
 def test_mcp_base_errors_and_hidden(
@@ -50,4 +55,4 @@ def test_mcp_base_errors_and_hidden(
 
     listed = mcp_bases.working_base_list_bases()
 
-    assert [item.entry_id for item in listed if item.kind == "local"] == [active.entry_id]
+    assert [item.entry_id for item in listed.items if item.kind == "local"] == [active.entry_id]

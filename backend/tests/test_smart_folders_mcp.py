@@ -17,14 +17,14 @@ def test_mcp_preset_tools(mcp_smart_folder_service: SmartFolderService) -> None:
     fetched = mcp_smart_folders.get_smart_folder_preset(created.id)
     renamed = mcp_smart_folders.update_smart_folder_preset(created.id, name="Bridge")
 
-    assert listed[0].id == created.id
+    assert listed.items[0].id == created.id
     assert fetched.filter.tags == ["bridge"]
     assert renamed.name == "Bridge"
 
     deleted = mcp_smart_folders.delete_smart_folder_preset(created.id)
 
     assert deleted.deleted is True
-    assert mcp_smart_folders.list_smart_folder_presets() == []
+    assert mcp_smart_folders.list_smart_folder_presets().items == []
 
 
 def test_mcp_graph_preview(

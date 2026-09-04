@@ -11,14 +11,14 @@ from dependencies import (
 from dependencies import get_sharing_service as load_sharing_service
 from interfaces.services.sharing import ISharingService
 from schemas.sharing import (
-    OwnerShareManagementItem,
+    OwnerShareManagementListResponse,
     ShareGrantCreateRequest,
     ShareGrantDeletedResponse,
     ShareGrantPermission,
     ShareGrantRecord,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_sharing_service() -> ISharingService:
@@ -42,12 +42,14 @@ def sharing_list_owner_grants(
     evaluation_at: str | None = None,
     base_id: str | None = None,
     entry_id: str | None = None,
-) -> list[OwnerShareManagementItem]:
-    return get_sharing_service().list_owner_view(
-        owner_actor_ref=owner_actor_ref,
-        evaluation_at=evaluation_at,
-        base_id=base_id,
-        entry_id=entry_id,
+) -> OwnerShareManagementListResponse:
+    return OwnerShareManagementListResponse(
+        items=get_sharing_service().list_owner_view(
+            owner_actor_ref=owner_actor_ref,
+            evaluation_at=evaluation_at,
+            base_id=base_id,
+            entry_id=entry_id,
+        )
     )
 
 
@@ -85,7 +87,10 @@ def sharing_delete_grant(grant_id: str) -> ShareGrantDeletedResponse:
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(sharing_list_owner_grants)
-    mcp.tool()(sharing_create_grant)
-    mcp.tool()(sharing_revoke_grant)
-    mcp.tool()(sharing_delete_grant)
+    register_tools(
+        mcp,
+        sharing_list_owner_grants,
+        sharing_create_grant,
+        sharing_revoke_grant,
+        sharing_delete_grant,
+    )

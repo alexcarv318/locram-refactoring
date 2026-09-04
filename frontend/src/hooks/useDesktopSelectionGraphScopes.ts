@@ -215,11 +215,11 @@ export function useDesktopSelectionGraphScopes({
     }
 
     if (activeTreeSelectionKind === "notes") {
-      if (activeSource && activeSource.kind !== "local-base") {
+      if (activeSource) {
         await loadSourceScope(activeSource, { forceRefresh: true });
         return;
       }
-      return;
+      await loadNotesScope({ forceRefresh: true });
     }
 
     if (graphScope?.kind === "smart-folder" && activeTreeSelectionKind === "smart-folder") {

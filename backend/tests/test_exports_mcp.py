@@ -11,7 +11,7 @@ def test_mcp_export_tools(mcp_export_service: ExportService) -> None:
     deleted = mcp_exports.artifact_delete_export(created.artifact_id)
 
     assert created.page_count == 3
-    assert [item.filename for item in items] == [Path(created.output_path).name]
+    assert [item.filename for item in items.items] == [Path(created.output_path).name]
     assert inspected.package_label == "MCP"
     assert deleted.deleted is True
-    assert mcp_exports.artifact_list_exports() == []
+    assert mcp_exports.artifact_list_exports().items == []

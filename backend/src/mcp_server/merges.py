@@ -1,4 +1,9 @@
 from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
     get_backup_repository,
     get_link_repository,
     get_merge_repository,
@@ -11,7 +16,7 @@ from schemas.merges import MergeOutcome, MergePlan
 from services.backups import BackupService
 from services.merges import MergeService
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_merge_service(
@@ -35,6 +40,12 @@ def get_merge_service(
         backup_service=BackupService(
             backup_repository=get_backup_repository(base_ref=base_ref, write=write)
         ),
+        access_service=get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
     )
 
 
@@ -47,5 +58,4 @@ def merge_execute(path: str, base_ref: str | None = None) -> MergeOutcome:
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(merge_plan)
-    mcp.tool()(merge_execute)
+    register_tools(mcp, merge_plan, merge_execute)

@@ -79,7 +79,7 @@ def test_filter_matcher_edge_cases(smart_folder_service: SmartFolderService) -> 
         }
     )
 
-    assert smart_folder_service.matches_filter(page, empty_explicit) is False
+    assert smart_folder_service.matches_filter(page, empty_explicit) is True
     assert smart_folder_service.matches_filter(page, page_ids) is False
     assert smart_folder_service.matches_filter(page, subjects) is True
     assert smart_folder_service.matches_filter(page, search) is True
@@ -118,6 +118,32 @@ def test_preset_crud_and_preview_xor(smart_folder_service: SmartFolderService) -
     smart_folder_service.delete_preset(created.id)
 
     assert smart_folder_service.list_presets() == []
+
+
+def test_persisted_explicit_filter_keeps_unrestricted_types(
+    smart_folder_service: SmartFolderService,
+) -> None:
+    created = smart_folder_service.create_preset(
+        "By subject",
+        FilterState.model_validate(
+            {
+                "selectionEncoding": "explicit",
+                "types": [],
+                "statuses": [],
+                "subjects": ["runtime"],
+            }
+        ),
+    )
+    fetched = smart_folder_service.get_preset(created.id)
+
+    assert smart_folder_service.matches_filter(make_summary(), fetched.filter) is True
+    assert (
+        smart_folder_service.matches_filter(
+            make_summary(subject=["other"]),
+            fetched.filter,
+        )
+        is False
+    )
 
 
 def test_built_in_scopes_and_graph(

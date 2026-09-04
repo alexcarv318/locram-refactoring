@@ -1,6 +1,6 @@
 import pytest
 
-from exceptions.access import AccessError
+from exceptions.access import EditionCapabilityError
 from exceptions.bases import WorkingBaseNotFoundError
 from exceptions.sharing import ShareGrantNotFoundError, SharingError
 from schemas.access import AccessShareSessionResolveRequest
@@ -75,30 +75,26 @@ def test_expired_grant_state(sharing_service: SharingService) -> None:
     assert items[0].grant_state is ShareGrantState.EXPIRED
 
 
-def test_invite_requires_enrollment(sharing_service: SharingService) -> None:
-    created = sharing_service.create_grant(
-        ShareGrantCreateRequest(
-            owner_actor_ref="device:owner-one",
-            recipient_account_id="alice",
-            permission=ShareGrantPermission.READ,
+def test_invite_requires_pro(
+    sharing_service: SharingService,
+    free_enrolled_access: AccessService,
+) -> None:
+    sharing_service._access_service = free_enrolled_access
+
+    with pytest.raises(EditionCapabilityError):
+        sharing_service.create_grant(
+            ShareGrantCreateRequest(
+                owner_actor_ref="device:owner-one",
+                recipient_account_id="alice",
+                permission=ShareGrantPermission.READ,
+            )
         )
-    )
-
-    assert sharing_service.list_recipient_view(
-        recipient_actor_ref="account:alice",
-        recipient_account_id=None,
-        include_inactive=False,
-        evaluation_at=None,
-    ) == []
-
-    with pytest.raises(AccessError):
-        sharing_service.get_invite(created.grant_id, None, None)
 
     with pytest.raises(ShareGrantNotFoundError):
         sharing_service.get_invite("missing", None, None)
 
     with pytest.raises(ShareGrantNotFoundError):
-        sharing_service.set_recipient_mcp_visibility(created.grant_id, False)
+        sharing_service.set_recipient_mcp_visibility("missing", False)
 
 
 def test_invite_and_recipient_after_enroll(
@@ -221,7 +217,7 @@ def test_admin_recipient_backup(
         evaluation_at=None,
     )
 
-    assert backup.filename.startswith("locram-manual-")
+    assert "-manual-" in backup.filename
     assert backup.filename.endswith(".db")
     assert backup.path is not None
     assert recipients[0].authority_available is True

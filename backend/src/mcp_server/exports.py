@@ -1,4 +1,9 @@
 from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
     get_export_repository,
     get_link_repository,
     get_page_repository,
@@ -11,14 +16,14 @@ from interfaces.services.exports import IExportService
 from schemas.exports import (
     ArtifactInspection,
     ExportDeletedResponse,
-    ExportRecord,
+    ExportListResponse,
     ExportResult,
     ExportScope,
 )
 from schemas.smart_folders import FilterState
 from services.exports import ExportService
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_export_service(
@@ -49,12 +54,24 @@ def get_export_service(
                 link_repository=link_repository,
                 page_repository=page_repository,
             ),
+            access_service=get_access_service(
+                access_repository=get_access_repository(),
+                access_relay=get_access_relay(),
+                http_client=get_access_http_client(),
+                settings=get_access_settings(),
+            ),
+        ),
+        access_service=get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
         ),
     )
 
 
-def artifact_list_exports(base_ref: str | None = None) -> list[ExportRecord]:
-    return get_export_service(base_ref=base_ref).list_exports()
+def artifact_list_exports(base_ref: str | None = None) -> ExportListResponse:
+    return ExportListResponse(items=get_export_service(base_ref=base_ref).list_exports())
 
 
 def artifact_inspect_artifact(path: str, base_ref: str | None = None) -> ArtifactInspection:
@@ -103,7 +120,10 @@ def export_subgraph(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(artifact_list_exports)
-    mcp.tool()(artifact_inspect_artifact)
-    mcp.tool()(artifact_delete_export)
-    mcp.tool()(export_subgraph)
+    register_tools(
+        mcp,
+        artifact_list_exports,
+        artifact_inspect_artifact,
+        artifact_delete_export,
+        export_subgraph,
+    )

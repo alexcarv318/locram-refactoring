@@ -1,19 +1,34 @@
-from dependencies import get_backup_repository
+from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
+    get_backup_repository,
+)
 from interfaces.services.backups import IBackupService
-from schemas.backups import BackupDeletedResponse, BackupRecord, RestoreResult
+from schemas.access import DesktopCapability
+from schemas.backups import BackupDeletedResponse, BackupListResponse, BackupRecord, RestoreResult
 from services.backups import BackupService
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_backup_service(base_ref: str | None = None, write: bool = False) -> IBackupService:
+    get_access_service(
+        access_repository=get_access_repository(),
+        access_relay=get_access_relay(),
+        http_client=get_access_http_client(),
+        settings=get_access_settings(),
+    ).deny_without_capability(DesktopCapability.MULTI_BASE)
+
     return BackupService(
         backup_repository=get_backup_repository(base_ref=base_ref, write=write)
     )
 
 
-def backup_list_backups(base_ref: str | None = None) -> list[BackupRecord]:
-    return get_backup_service(base_ref=base_ref).list_backups()
+def backup_list_backups(base_ref: str | None = None) -> BackupListResponse:
+    return BackupListResponse(items=get_backup_service(base_ref=base_ref).list_backups())
 
 
 def backup_create_backup(
@@ -59,8 +74,11 @@ def backup_restore_backup(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(backup_list_backups)
-    mcp.tool()(backup_create_backup)
-    mcp.tool()(backup_delete_backup)
-    mcp.tool()(backup_rename_backup)
-    mcp.tool()(backup_restore_backup)
+    register_tools(
+        mcp,
+        backup_list_backups,
+        backup_create_backup,
+        backup_delete_backup,
+        backup_rename_backup,
+        backup_restore_backup,
+    )

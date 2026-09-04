@@ -1,4 +1,9 @@
 from dependencies import (
+    get_access_http_client,
+    get_access_relay,
+    get_access_repository,
+    get_access_service,
+    get_access_settings,
     get_embedding_repository,
     get_page_repository,
     get_session,
@@ -13,7 +18,7 @@ from schemas.embeddings import (
     UnembeddedResponse,
 )
 
-from .protocol import MCPServerApp
+from .protocol import MCPServerApp, register_tools
 
 
 def get_embedding_service(
@@ -27,6 +32,12 @@ def get_embedding_service(
     return load_embedding_service(
         get_embedding_repository(db=get_session(base_ref, write)),
         get_page_repository(base_ref=base_ref, recipient_actor_ref=recipient_actor_ref),
+        get_access_service(
+            access_repository=get_access_repository(),
+            access_relay=get_access_relay(),
+            http_client=get_access_http_client(),
+            settings=get_access_settings(),
+        ),
     )
 
 
@@ -97,8 +108,11 @@ def find_stale_embeddings(
 
 
 def register(mcp: MCPServerApp) -> None:
-    mcp.tool()(hybrid_search)
-    mcp.tool()(search_capability_status)
-    mcp.tool()(store_embedding)
-    mcp.tool()(find_unembedded)
-    mcp.tool()(find_stale_embeddings)
+    register_tools(
+        mcp,
+        hybrid_search,
+        search_capability_status,
+        store_embedding,
+        find_unembedded,
+        find_stale_embeddings,
+    )

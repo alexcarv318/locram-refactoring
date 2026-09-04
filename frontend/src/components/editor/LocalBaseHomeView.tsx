@@ -199,9 +199,10 @@ export default function LocalBaseHomeView({
     baseStats?.due_for_review_count !== null && baseStats?.due_for_review_count !== undefined
       ? String(baseStats.due_for_review_count)
       : t("common.unavailable");
-  const headerSubtitle = isInspectMode
-    ? t("fileHome.layout.subtitle.localBaseInspect")
-    : t("fileHome.layout.subtitle.localBaseActive");
+  const headerSubtitle =
+    isInspectMode && !isShownBaseActive
+      ? t("fileHome.layout.subtitle.localBaseInspect")
+      : t("fileHome.layout.subtitle.localBaseActive");
   const manualEmbedMutation = useMutation({
     mutationFn: () =>
       runManualEmbed(bridgeBaseUrl, { baseRef: `local:${source.entryId}` }),
@@ -269,39 +270,17 @@ export default function LocalBaseHomeView({
       mono: true,
       value: fileHomeDetailValue(inspectSummary?.base_id ?? source.baseId, t),
     },
-    {
-      label: t("fileHome.detail.artifactId"),
-      mono: true,
-      value: fileHomeDetailValue(inspectSummary?.artifact_id, t),
-    },
-    {
-      label: t("fileHome.detail.sourceBaseId"),
-      mono: true,
-      value: fileHomeDetailValue(inspectSummary?.source_base_id, t),
-    },
-    {
-      label: t("fileHome.detail.packageLabel"),
-      value: fileHomeDetailValue(inspectSummary?.package_label, t),
-    },
     { label: t("fileHome.detail.attachmentCoverage"), value: coverageLabel },
     {
       label: t("fileHome.detail.created"),
       value: fileHomeDetailValue(
-        formatFileHomeTimestamp(inspectSummary?.created_at, t, locale),
+        formatFileHomeTimestamp(
+          inspectSummary?.created_at ?? activeBaseEntry?.registered_at,
+          t,
+          locale,
+        ),
         t,
       ),
-    },
-    {
-      label: t("fileHome.detail.artifactSchemaFamily"),
-      value: fileHomeDetailValue(inspectSummary?.artifact_schema_family, t),
-    },
-    {
-      label: t("fileHome.detail.artifactSchemaVersion"),
-      value:
-        inspectSummary?.artifact_schema_version !== null &&
-        inspectSummary?.artifact_schema_version !== undefined
-          ? String(inspectSummary.artifact_schema_version)
-          : t("common.unavailable"),
     },
   ];
   const primaryMetrics = [
@@ -394,7 +373,8 @@ export default function LocalBaseHomeView({
     setActionNotice(null);
     try {
       const switched = await ensureShellActiveBase();
-      await createBackup(bridgeBaseUrl, "manual");
+      await createBackup(bridgeBaseUrl, "manual", `local:${source.entryId}`);
+      await queryClient.invalidateQueries({ queryKey: ["backups", bridgeBaseUrl] });
       await refreshBaseRegistry();
       setActionNotice(
         switched
